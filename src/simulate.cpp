@@ -39,167 +39,90 @@ void init_global()
 	g337 = 337.5f / radian;
 }
 
-void get_xy(float r, float f, float &x, float &y)
+void get_xy(const fvec& rf, fvec& xy)
 {
-	if( r < 0.0f || f < 0.0f )
+	float ff = rf(1);
+
+	if( rf(0) < 0.0f || ff < 0.0f )
 	{
-		x = 0.0f;
-		y = 0.0f;
+		xy(0) = 0.0f;
+		xy(1) = 0.0f;
 	}
-	if( f <= g90 )
+	if( ff <= g90 )
 	{
-		x = r * sin(f);
-		y = r * cos(f);
+		xy(0) = rf(0) * sin(ff);
+		xy(1) = rf(0) * cos(ff);
 	}
-	else if( f <= g180 )
+	else if( ff <= g180 )
 	{
-		f -= g90;
-		x = r * cos(f);
-		y = -r * sin(f);
+		ff -= g90;
+		xy(0) = rf(0) * cos(ff);
+		xy(1) = -rf(0) * sin(ff);
 	}
-	else if( f <= g270 )
+	else if( ff <= g270 )
 	{
-		f -= g180;
-		x = -r * sin(f);
-		y = -r * cos(f);
+		ff -= g180;
+		xy(0) = -rf(0) * sin(ff);
+		xy(1) = -rf(0) * cos(ff);
 	}
-	else if( f <= g360 )
+	else if( ff <= g360 )
 	{
-		f -= g270;
-		x = -r * cos(f);
-		y = r * sin(f);
+		ff -= g270;
+		xy(0) = -rf(0) * cos(ff);
+		xy(1) = rf(0) * sin(ff);
 	}	
 	else
 	{
-		f -= g360;
-		x = r * sin(f);
-		y = r * cos(f);
+		ff -= g360;
+		xy(0) = rf(0) * sin(ff);
+		xy(1) = rf(0) * cos(ff);
 	}
 }
 
-float get_slant(float x, float y, float h)
+void get_rf(const fvec& xy, fvec& rf)
 {
-	float r = sqrt(x*x + y*y + h*h);
+	rf(0) = std::hypot(xy(0), xy(1));
 
-	return r;
-}
-
-void get_from_slant(float r, float h, float f, float &x, float &y)
-{
-	float rm = sqrt(r*r - h*h);
-
-	get_xy(rm, f, x, y);
-}
-
-
-void get_rf(float x, float y, float &r, float &f)
-{
-	r = std::hypot(x, y);
-
-	if( r > 0.001f )
+	if( rf(0) > 0.001f )
 	{
-		f = acos(y / r);
-		if( x < 0.0f )
-			f = g360 - f;
+		rf(1) = acos(xy(1) / rf(0));
+		if( xy(0) < 0.0f )
+			rf(1) = g360 - rf(1);
 	}
 	else
-		f = 0.0f;
+		rf(1) = 0.0f;
 }
 
-void get_rls_from_sim(float rx, float ry, float x, float y, float h, float &xs, float &ys, float &xn, float &yn)
+bool inside(const float left, const float right, const float angle)
 {
-	float xrel = x - rx;
-	float yrel = y - ry;
+	bool ret = false;
 
-       	float r, f;
-	get_rf(xrel, yrel, r, f);
-	float rs = get_slant(xrel, yrel, h);
+	float df = right - left;
 
-	float rn = rs + 150.0f * randn<float>();
-	float fn = f + 0.1/radian*randn<float>();
-
-	get_xy(rs, f, xs, ys);
-	xs += rx;
-	ys += ry;
-
-	get_xy(rn, fn, xn, yn);
-	xn += rx;
-	yn += ry;
-}
-
-void lt()
-{
-	std::vector<float> xreal, yreal;
-	std::vector<float> xr1, yr1, xr1n, yr1n;
-
-	xreal.reserve(1000);
-	yreal.reserve(1000);
-
-	xr1.reserve(1000);
-	yr1.reserve(1000);
-	xr1n.reserve(1000);
-	yr1n.reserve(1000);
-
-	float xpos = 400000.0f;
-	float ypos = 50000.0f;
-
-	float v = 250.0f; // скорость
-	float f = 265.0f; // курс
-
-	float dt = 5.0f;
-
-	float vx, vy;
-
-	get_xy(v, f / radian, vx, vy);
-	std::cout << "vx = " << vx << " vy " << vy << std::endl;
-	
-	xreal.push_back(xpos);
-	yreal.push_back(ypos);
-
-	float rx = 0.0f;
-	float ry = 0.0f;
-
-	float h = 10000.0f;
-	float xs, ys, xn, yn;
-
-	get_rls_from_sim(rx, ry, xpos, ypos, h, xs, ys, xn, yn);
-	xr1.push_back(xs);
-	yr1.push_back(ys);
-	xr1n.push_back(xn);
-	yr1n.push_back(yn);
-
-
-	for( int i=0; i<700; ++i )
+	if( df > 0.0f )
+		ret = (angle >= left) && (angle <= right);
+	else if( df < 0.0f )
 	{
-		xpos += vx * dt;
-		xreal.push_back(xpos);
-
-		ypos += vy * dt;
-		yreal.push_back(ypos);
-	
-		get_rls_from_sim(rx, ry, xpos, ypos, h, xs, ys, xn, yn);
-		xr1.push_back(xs);
-		yr1.push_back(ys);
-		xr1n.push_back(xn);
-		yr1n.push_back(yn);
+		if( fabs(df) >= g180 )
+			ret = (angle >= left) || (angle <= right);
+		else
+			ret = (angle >= right) && (angle <= left);
 	}
+	else
+		ret = (angle == left);
 
-	xreal.shrink_to_fit();
-	yreal.shrink_to_fit();
+	return ret;
+}
 
-	xr1.shrink_to_fit();
-	yr1.shrink_to_fit();
-	xr1n.shrink_to_fit();
-	yr1n.shrink_to_fit();
+bool north_crossed(const float f1, const float f2)
+{
+	bool rc = false;
+	float df = fabs(f1 - f2);
 
-	plt::plot(xreal, yreal);
-	plt::plot(xr1, yr1);
-	plt::plot(xr1n, yr1n);
-	plt::xlim(-400000.0f, 400000.0f);
-	plt::ylim(-100000.0f, 100000.0f);
-	plt::grid(true);
-	plt::save("./simulate.png");
-	plt::show();
+	if( df > g180 )
+		rc = true;
+
+	return rc;
 }
 
 typedef struct _rls_t
@@ -209,8 +132,11 @@ typedef struct _rls_t
 		pos_ = zeros<fvec>(3);
 		to_ = 0.0f;
 		vr_ = 0.0f;
-		az_beg_ = 0.0f;
-		az_end_ = 0.0f;
+		az_ = 0.0f;
+	}
+	void set_az(const float az)
+	{
+		az_ = az / radian;
 	}
 	void set_pos(float x, float y, float h)
 	{
@@ -223,76 +149,20 @@ typedef struct _rls_t
 		to_ = to;
 		vr_ = g360 / to_;
 	}
-	void do_rotate(float t)
+	void do_rotate_pre(const float dt)
 	{
-		az_end_ = az_beg_ + vr_ * t;
-		if( az_end_ >= g360 )
-			az_end_ -= g360;
-
-		// ...
-		//
-
-		az_beg_ = az_end_;
-
+		azn_ = az_ + vr_ * dt;
+		if( azn_ >= g360 )
+			azn_ -= g360;
+	}
+	void do_rotate_end()
+	{
+		az_ = azn_;
 	}
 	void set_cko(float r_cko, float f_cko)
 	{
 		r_cko_ = r_cko;
 		f_cko_ = f_cko / radian;
-	}
-	void get_xy(const fvec& rf, fvec& xy)
-	{
-		float ff = rf(1);
-
-		if( rf(0) < 0.0f || ff < 0.0f )
-		{
-			xy(0) = 0.0f;
-			xy(1) = 0.0f;
-		}
-		if( ff <= g90 )
-		{
-			xy(0) = rf(0) * sin(ff);
-			xy(1) = rf(0) * cos(ff);
-		}
-		else if( ff <= g180 )
-		{
-			ff -= g90;
-			xy(0) = rf(0) * cos(ff);
-			xy(1) = -rf(0) * sin(ff);
-		}
-		else if( ff <= g270 )
-		{
-			ff -= g180;
-			xy(0) = -rf(0) * sin(ff);
-			xy(1) = -rf(0) * cos(ff);
-		}
-		else if( ff <= g360 )
-		{
-			ff -= g270;
-			xy(0) = -rf(0) * cos(ff);
-			xy(1) = rf(0) * sin(ff);
-		}	
-		else
-		{
-			ff -= g360;
-			xy(0) = rf(0) * sin(ff);
-			xy(1) = rf(0) * cos(ff);
-		}
-	}
-	void get_rf(const fvec& target, fvec& rf)
-	{
-		float x = target(0);
-		float y = target(1);
-		rf(0) = std::hypot(x, y);
-
-		if( rf(0) > 0.001f )
-		{
-			rf(1) = acos(y / rf(0));
-			if( x < 0.0f )
-				rf(1) = g360 - rf(1);
-		}
-		else
-			rf(1) = 0.0f;
 	}
 	float get_slant(const fvec& target)
 	{
@@ -326,40 +196,230 @@ typedef struct _rls_t
 		get_xy(rf, noi);
 		noise(0) = pos_(0) + noi(0);
 		noise(1) = pos_(1) + noi(1);
-	}	
+	}
+	bool crossed_target(const fvec& pos)
+	{
+		fvec rf = zeros<fvec>(2);
+
+		get_rf(pos, rf);
+
+		return inside(az_, azn_, rf(1));
+	}
+	bool crossed_ray(const fvec& pos, const fvec& posn)
+	{
+		bool ret = false;
+
+		fvec rf = zeros<fvec>(2);
+		fvec rfn = zeros<fvec>(2);
+
+		get_rf(pos, rf);
+		get_rf(posn, rfn);
+
+		bool crossed = north_crossed(rf(1), rfn(1));
+
+		if( crossed )
+		{
+			if( rf(1) < rfn(1) )
+				ret = inside(rf(1), rfn(1), az_);
+		}
+		else
+		{
+			if( rf(1) > rfn(1) )
+				ret = inside(rf(1), rfn(1), az_);
+		}
+
+		return ret;
+	}
 	void print()
 	{
 		pos_.print();
 	}
 	fvec pos_;
 	float to_, vr_;
-	float az_beg_, az_end_;
+	float az_, azn_;
 	float r_cko_, f_cko_;
 } rls_t;
 
-void target_update(const fvec& target)
-{
-}
 
-typedef struct _traj_t
+typedef struct _track_t
 {
 	void init(int count)
 	{
-		x.reserve(count);
-		y.reserve(count);
+		x_.reserve(count);
+		y_.reserve(count);
+		h_.reserve(count);
+		t_.reserve(count);
 	}
 	void shrink()
 	{
-		x.shrink_to_fit();
-		y.shrink_to_fit();
+		x_.shrink_to_fit();
+		y_.shrink_to_fit();
+		h_.shrink_to_fit();
+		t_.shrink_to_fit();
 	}
 	void update(const fvec& data)
 	{
-		x.push_back(data(0));
-		y.push_back(data(1));
+		x_.push_back(data(0));
+		y_.push_back(data(1));
+
+		if( data.size() > 2 )
+			h_.push_back(data(2));
+
+		if( data.size() > 3 )
+			t_.push_back(data(3));
 	}
-	std::vector<float> x, y;
-} traj_t;
+	void update(const float t, const fvec& data)
+	{
+		x_.push_back(data(0));
+		y_.push_back(data(1));
+
+		if( data.size() > 2 )
+			h_.push_back(data(2));
+
+		t_.push_back(t);
+	}
+	std::vector<float> x_, y_, h_, t_;
+} track_t;
+
+typedef struct
+{
+	void init()
+	{
+		pos_ = zeros<fvec>(3);
+		vf_ = zeros<fvec>(2);
+		velo_ = zeros<fvec>(2);
+
+		posn_ = zeros<fvec>(3);
+		vfn_ = zeros<fvec>(2);
+		velon_ = zeros<fvec>(2);
+
+		th_ = 0.0f; ta_ = 0.0f; tf_ = 0.0f;
+	}
+	void set(const float x, const float y, const float h, const float v, const float f)
+	{
+		pos_(0) = x;
+		pos_(1) = y;
+		pos_(2) = h;
+
+		vf_(0) = v;
+		vf_(1) = f;
+
+		get_xy(vf_, velo_);
+	}
+	void set(const fvec& pos, float v, float f)
+	{
+		pos_ = pos;
+
+		vf_(0) = v;
+		vf_(1) = f;
+
+		get_xy(vf_, velo_);
+	}
+	void set_speed(const float accel, const float velo)
+	{
+		float dv = fabs(vf_(0) - velo);
+		ta_ = fabs(dv / accel);
+
+		accel_ = fabs(accel);
+		if( velo < vf_(0) )
+			accel_ = -accel_;
+	}
+	void set_height(const float climb, const float height)
+	{
+		float dh = fabs(pos_(2) - height);
+		th_ = fabs(dh / climb);
+
+		climb_ = fabs(climb);
+		if( height < pos_(2) )
+			climb_ = -climb_;
+	}
+	void set_f(const float gamma, const float f)
+	{
+		cmd_gamma_ = gamma;
+		cmd_f_ = f;
+
+		float gamma_sign;
+		float df = fabs(vf_(1)*radian - f);
+		if( df >= 180.0f )
+		{
+			df = 360.0f - df;
+			gamma_sign = (f > vf_(1)*radian) ? -1.0f : 1.0f;
+		}
+		else
+		{
+			gamma_sign = (f < vf_(1)*radian) ? -1.0f : 1.0f;
+		}
+
+		tf_ = 2.0f*pi*vf_(0)*df/(9.81*tan(fabs(gamma)/radian)*360.0f);
+
+		rotate_ = gamma_sign * df / (tf_ * radian);
+	}
+	void update_pre( float dt )
+	{
+		posn_(0) = pos_(0) + velo_(0)*dt;
+		posn_(1) = pos_(1) + velo_(1)*dt;
+		posn_(2) = pos_(2);
+
+		if( th_ > 0.0f )
+			posn_(2) += climb_*dt;
+
+		vfn_ = vf_;
+		if( ta_ > 0.0f )
+			vfn_(0) = vf_(0) + accel_*dt;
+
+		if( tf_ > 0.0f )
+		{
+			vfn_(1) = vf_(1) + rotate_*dt;
+			if( vfn_(1) >= g360 )
+				vfn_(1) -= g360;
+			else if( vfn_(1) < 0.0f )
+				vfn_(1) += g360;
+		}
+
+		if( (ta_ > 0.0f) || (tf_ > 0.0f) )
+			get_xy(vfn_, velon_);
+	}
+	void update_end( float dt )
+	{
+		pos_ = posn_;
+		vf_ = vfn_;
+
+		if( (ta_ > 0.0f) && (tf_ > 0.0f) )
+			set_f(cmd_gamma_, cmd_f_);
+
+		get_xy(vf_, velo_);
+
+		if( th_ > 0.0f )
+			th_ = max(0.0f, th_ - dt);
+
+		if( ta_ > 0.0f )
+			ta_ = max(0.0f, ta_ - dt);
+
+		if( tf_ > 0.0f )
+			tf_ = max(0.0f, tf_ - dt);
+	}
+	fvec pos_;
+	fvec vf_;
+	fvec velo_;
+
+	fvec posn_;
+	fvec vfn_;
+	fvec velon_;
+
+	float th_, ta_, tf_;
+	float accel_, rotate_, climb_;
+	float cmd_f_, cmd_gamma_;
+} target_t;
+
+std::vector<float> ttt, xxx, yyy, hhh;
+
+void push_data(const fvec& pos)
+{
+	xxx.push_back(pos(0));
+	yyy.push_back(pos(1));
+	if( pos.size() > 2 )
+		hhh.push_back(pos(2));
+}	
 
 int main() 
 {
@@ -370,26 +430,32 @@ int main()
 	rls1.init();
 	rls1.set_pos(500.0f, 300.f, 20.0f);
 	rls1.set_cko(60.0f, 0.1f/radian);
+	rls1.set_rotate(5.0f);
 
 	rls2.init();
 	rls2.set_pos(3000.0f, -2000.0f, 100.0f);
 	rls2.set_cko(300.0f, 0.2f/radian);
+	rls2.set_rotate(10.0f);
 
 	rls3.init();
 	rls3.set_pos(100000.0f, 100000.0f, 200.0f);
 	rls3.set_cko(150.0f, 0.15f/radian);
+	rls3.set_rotate(10.0f);
 
 	rls4.init();
 	rls4.set_pos(100000.0f, -100000.0f, 700.0f);
 	rls4.set_cko(300.0f, 0.2f/radian);
+	rls4.set_rotate(20.0f);
 
 	rls5.init();
 	rls5.set_pos(-100000.0f, -100000.0f, 100.0f);
 	rls5.set_cko(150.0f, 0.15f/radian);
+	rls6.set_rotate(10.0f);
 
 	rls6.init();
 	rls6.set_pos(-100000.0f, 100000.0f, 70.0f);
 	rls6.set_cko(300.0f, 0.2f/radian);
+	rls6.set_rotate(20.0f);
 
 	fvec target = zeros<fvec>(3);
 
@@ -397,11 +463,9 @@ int main()
 	target(1) = 50000.0f;
 	target(2) = 10000.0f;
 
-	fvec measure = zeros<fvec>(2);
-	fvec noise = zeros<fvec>(2);
+	track_t tt, r1m, r1n, r2m, r2n, r3m, r3n, r4m, r4n;
+	track_t r5m, r5n, r6m, r6n;
 
-	traj_t tt, r1m, r1n, r2m, r2n, r3m, r3n, r4m, r4n;
-	traj_t r5m, r5n, r6m, r6n;
 	tt.init(1000);
 	r1m.init(1000);
 	r1n.init(1000);
@@ -431,9 +495,7 @@ int main()
 
 	fvec vv = zeros<fvec>(2);
 
-	rls1.get_xy(pos, vv);
-
-	std::cout << "vx = " << vv(0) << " vy " << vv(1) << std::endl;
+	get_xy(pos, vv);
 
 	int count = 0;
 	tt.update(target);
@@ -442,220 +504,94 @@ int main()
 	rls1.do_measure(target, posm, posn);	
 	r1m.update(posm);
 	r1n.update(posn);
-	
-	for( int i=0; i<150; ++i )
+
+
+	std::vector<rls_t> rlist;
+	rlist.push_back(rls4);
+
+	target_t t1;
+	t1.init();
+	t1.set(target, pos(0), pos(1));
+
+	std::vector<target_t> tlist;
+	tlist.push_back(t1);
+
+	float ttx = 0.0f;
+	float ttx_max = 3500.0f;
+	float dtt = 1.0f;
+
+	ttt.push_back(ttx);
+	push_data(t1.pos_);
+
+	while( ttx <= ttx_max )
 	{
-		target(0) += vv(0) * dt;
-		target(1) += vv(1) * dt;
-		tt.update(target);
-		count++;
-
-		rls1.do_measure(target, posm, posn);	
-		r1m.update(posm);
-		r1n.update(posn);
-
-		if( 0 == count % 2 )
+		for( auto ti=tlist.begin(); ti != tlist.end(); ++ti )
 		{
-			rls3.do_measure(target, posm, posn);	
-			r3m.update(posm);
-			r3n.update(posn);
-			
-			rls5.do_measure(target, posm, posn);	
-			r5m.update(posm);
-			r5n.update(posn);
+#if 0			
+			if( ttx == 20.0f )
+				ti->set_speed(5.0f, 180.0f);
+
+			if( ttx == 40.0f )
+				ti->set_speed(2.0f, 200.0f);
+
+			if( ttx == 10.0f )
+				ti->set_height(12.0f, 8600.f);
+
+			if( ttx == 200.0f )
+				ti->set_f(30.0f, 345.0f);
+
+			if( ttx == 210.0f )
+				ti->set_speed(5.0f, 250.0f);
+
+			if( ttx == 300.0f )
+				ti->set_f(10.0f, 320.0f);
+
+			if( ttx == 400.0f )
+				ti->set_f(10.0f, 20.0f);
+
+			if( ttx == 600.0f )
+				ti->set_f(15.0f, 327.0f);
+#endif
+
+			ti->update_pre(dtt);
+
+			for( auto ri=rlist.begin(); ri != rlist.end(); ++ri )
+			{
+				if( ri->crossed_ray(ti->pos_, ti->posn_) )
+				{
+					ri->do_measure(ti->posn_, posm, posn);
+					push_data(posn);
+				}
+			}
+
+			ti->update_end(dtt);
 		}
 
-		if( 0 == count % 4 )
+		for( auto ri=rlist.begin(); ri != rlist.end(); ++ri )
 		{
-			rls2.do_measure(target, posm, posn);	
-			r2m.update(posm);
-			r2n.update(posn);
-			
-			rls4.do_measure(target, posm, posn);	
-			r4m.update(posm);
-			r4n.update(posn);
-			
-			rls6.do_measure(target, posm, posn);	
-			r6m.update(posm);
-			r6n.update(posn);
+			ri->do_rotate_pre(dtt);
+
+			for( auto ti=tlist.begin(); ti != tlist.end(); ++ti )
+			{
+				if( ri->crossed_target(ti->posn_) )
+				{
+					ri->do_measure(ti->posn_, posm, posn);
+					push_data(posn);
+				}
+			}
+
+			ri->do_rotate_end();
 		}
 
-		target(0) += vv(0) * dt;
-		target(1) += vv(1) * dt;
-		tt.update(target);
-		count++;
-
-		rls1.do_measure(target, posm, posn);	
-		r1m.update(posm);
-		r1n.update(posn);
-
-		if( 0 == count % 2 )
-		{
-			rls3.do_measure(target, posm, posn);	
-			r3m.update(posm);
-			r3n.update(posn);
-			
-			rls5.do_measure(target, posm, posn);	
-			r5m.update(posm);
-			r5n.update(posn);
-		}
-
-		if( 0 == count % 4 )
-		{
-			rls2.do_measure(target, posm, posn);	
-			r2m.update(posm);
-			r2n.update(posn);
-			
-			rls4.do_measure(target, posm, posn);	
-			r4m.update(posm);
-			r4n.update(posn);
-			
-			rls6.do_measure(target, posm, posn);	
-			r6m.update(posm);
-			r6n.update(posn);
-		}
-
-
-		target(0) += vv(0) * dt;
-		target(1) += vv(1) * dt;
-		tt.update(target);
-		count++;
-
-		rls1.do_measure(target, posm, posn);	
-		r1m.update(posm);
-		r1n.update(posn);
-
-		if( 0 == count % 2 )
-		{
-			rls3.do_measure(target, posm, posn);	
-			r3m.update(posm);
-			r3n.update(posn);
-			
-			rls5.do_measure(target, posm, posn);	
-			r5m.update(posm);
-			r5n.update(posn);
-		}
-
-		if( 0 == count % 4 )
-		{
-			rls2.do_measure(target, posm, posn);	
-			r2m.update(posm);
-			r2n.update(posn);
-			
-			rls4.do_measure(target, posm, posn);	
-			r4m.update(posm);
-			r4n.update(posn);
-			
-			rls6.do_measure(target, posm, posn);	
-			r6m.update(posm);
-			r6n.update(posn);
-		}
-
-
-		target(0) += vv(0) * dt;
-		target(1) += vv(1) * dt;
-		tt.update(target);
-		count++;
-
-		rls1.do_measure(target, posm, posn);	
-		r1m.update(posm);
-		r1n.update(posn);
-
-		if( 0 == count % 2 )
-		{
-			rls3.do_measure(target, posm, posn);	
-			r3m.update(posm);
-			r3n.update(posn);
-			
-			rls5.do_measure(target, posm, posn);	
-			r5m.update(posm);
-			r5n.update(posn);
-		}
-
-		if( 0 == count % 4 )
-		{
-			rls2.do_measure(target, posm, posn);	
-			r2m.update(posm);
-			r2n.update(posn);
-			
-			rls4.do_measure(target, posm, posn);	
-			r4m.update(posm);
-			r4n.update(posn);
-			
-			rls6.do_measure(target, posm, posn);	
-			r6m.update(posm);
-			r6n.update(posn);
-		}
-
-
-		target(0) += vv(0) * dt;
-		target(1) += vv(1) * dt;
-		tt.update(target);
-		count++;
-
-		rls1.do_measure(target, posm, posn);	
-		r1m.update(posm);
-		r1n.update(posn);
-
-		if( 0 == count % 2 )
-		{
-			rls3.do_measure(target, posm, posn);	
-			r3m.update(posm);
-			r3n.update(posn);
-			
-			rls5.do_measure(target, posm, posn);	
-			r5m.update(posm);
-			r5n.update(posn);
-		}
-
-		if( 0 == count % 4 )
-		{
-			rls2.do_measure(target, posm, posn);	
-			r2m.update(posm);
-			r2n.update(posn);
-			
-			rls4.do_measure(target, posm, posn);	
-			r4m.update(posm);
-			r4n.update(posn);
-			
-			rls6.do_measure(target, posm, posn);	
-			r6m.update(posm);
-			r6n.update(posn);
-		}
+		ttx += dtt;
+		ttt.push_back(ttx);
 	}
 
-	tt.shrink();
-	r1m.shrink();
-	r1n.shrink();
-	r2m.shrink();
-	r2n.shrink();
-	r3m.shrink();
-	r3n.shrink();
-	r4m.shrink();
-	r4n.shrink();
-	r5m.shrink();
-	r5n.shrink();
-	r6m.shrink();
-	r6n.shrink();
-
-	plt::plot(tt.x, tt.y);
-//	plt::plot(r1m.x, r1m.y);
-	plt::plot(r1n.x, r1n.y);
-//	plt::plot(r2m.x, r2m.y);
-	plt::plot(r2n.x, r2n.y);
-//	plt::plot(r3m.x, r3m.y);
-	plt::plot(r3n.x, r3n.y);
-//	plt::plot(r4m.x, r4m.y);
-	plt::plot(r4n.x, r4n.y);
-//	plt::plot(r5m.x, r5m.y);
-	plt::plot(r5n.x, r5n.y);
-//	plt::plot(r6m.x, r6m.y);
-	plt::plot(r6n.x, r6n.y);
-	plt::xlim(-400000.0f, 400000.0f);
-	plt::ylim(-100000.0f, 100000.0f);
+	plt::plot(xxx, yyy);
+//	plt::xlim(-400000.0f, 400000.0f);
+//	plt::ylim(-100000.0f, 100000.0f);
 	plt::grid(true);
 	plt::save("./simulate.png");
 	plt::show();
-//#endif	
   return 0;
 }
