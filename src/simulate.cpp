@@ -125,6 +125,46 @@ bool north_crossed(const float f1, const float f2)
 	return rc;
 }
 
+typedef struct _track_t
+{
+	void init(int count)
+	{
+		x_.reserve(count);
+		y_.reserve(count);
+		h_.reserve(count);
+		t_.reserve(count);
+	}
+	void shrink()
+	{
+		x_.shrink_to_fit();
+		y_.shrink_to_fit();
+		h_.shrink_to_fit();
+		t_.shrink_to_fit();
+	}
+	void update(const fvec& data)
+	{
+		x_.push_back(data(0));
+		y_.push_back(data(1));
+
+		if( data.size() > 2 )
+			h_.push_back(data(2));
+
+		if( data.size() > 3 )
+			t_.push_back(data(3));
+	}
+	void update(const float t, const fvec& data)
+	{
+		x_.push_back(data(0));
+		y_.push_back(data(1));
+
+		if( data.size() > 2 )
+			h_.push_back(data(2));
+
+		t_.push_back(t);
+	}
+	std::vector<float> x_, y_, h_, t_;
+} track_t;
+
 typedef struct _rls_t
 {
 	void init()
@@ -133,6 +173,8 @@ typedef struct _rls_t
 		to_ = 0.0f;
 		vr_ = 0.0f;
 		az_ = 0.0f;
+
+		track_.init(1000);
 	}
 	void set_az(const float az)
 	{
@@ -238,48 +280,10 @@ typedef struct _rls_t
 	float to_, vr_;
 	float az_, azn_;
 	float r_cko_, f_cko_;
+	track_t track_;
 } rls_t;
 
 
-typedef struct _track_t
-{
-	void init(int count)
-	{
-		x_.reserve(count);
-		y_.reserve(count);
-		h_.reserve(count);
-		t_.reserve(count);
-	}
-	void shrink()
-	{
-		x_.shrink_to_fit();
-		y_.shrink_to_fit();
-		h_.shrink_to_fit();
-		t_.shrink_to_fit();
-	}
-	void update(const fvec& data)
-	{
-		x_.push_back(data(0));
-		y_.push_back(data(1));
-
-		if( data.size() > 2 )
-			h_.push_back(data(2));
-
-		if( data.size() > 3 )
-			t_.push_back(data(3));
-	}
-	void update(const float t, const fvec& data)
-	{
-		x_.push_back(data(0));
-		y_.push_back(data(1));
-
-		if( data.size() > 2 )
-			h_.push_back(data(2));
-
-		t_.push_back(t);
-	}
-	std::vector<float> x_, y_, h_, t_;
-} track_t;
 
 typedef struct
 {
@@ -411,16 +415,6 @@ typedef struct
 	float cmd_f_, cmd_gamma_;
 } target_t;
 
-std::vector<float> ttt, xxx, yyy, hhh;
-
-void push_data(const fvec& pos)
-{
-	xxx.push_back(pos(0));
-	yyy.push_back(pos(1));
-	if( pos.size() > 2 )
-		hhh.push_back(pos(2));
-}	
-
 int main() 
 {
 	init_global();
@@ -431,31 +425,37 @@ int main()
 	rls1.set_pos(500.0f, 300.f, 20.0f);
 	rls1.set_cko(60.0f, 0.1f/radian);
 	rls1.set_rotate(5.0f);
+	rls1.set_az(360.0f*randu());
 
 	rls2.init();
 	rls2.set_pos(3000.0f, -2000.0f, 100.0f);
 	rls2.set_cko(300.0f, 0.2f/radian);
 	rls2.set_rotate(10.0f);
+	rls2.set_az(360.0f*randu());
 
 	rls3.init();
 	rls3.set_pos(100000.0f, 100000.0f, 200.0f);
 	rls3.set_cko(150.0f, 0.15f/radian);
 	rls3.set_rotate(10.0f);
+	rls3.set_az(360.0f*randu());
 
 	rls4.init();
 	rls4.set_pos(100000.0f, -100000.0f, 700.0f);
 	rls4.set_cko(300.0f, 0.2f/radian);
 	rls4.set_rotate(20.0f);
+	rls4.set_az(360.0f*randu());
 
 	rls5.init();
 	rls5.set_pos(-100000.0f, -100000.0f, 100.0f);
 	rls5.set_cko(150.0f, 0.15f/radian);
-	rls6.set_rotate(10.0f);
+	rls5.set_rotate(10.0f);
+	rls5.set_az(360.0f*randu());
 
 	rls6.init();
 	rls6.set_pos(-100000.0f, 100000.0f, 70.0f);
 	rls6.set_cko(300.0f, 0.2f/radian);
 	rls6.set_rotate(20.0f);
+	rls6.set_az(360.0f*randu());
 
 	fvec target = zeros<fvec>(3);
 
@@ -463,22 +463,9 @@ int main()
 	target(1) = 50000.0f;
 	target(2) = 10000.0f;
 
-	track_t tt, r1m, r1n, r2m, r2n, r3m, r3n, r4m, r4n;
-	track_t r5m, r5n, r6m, r6n;
+	track_t track;
 
-	tt.init(1000);
-	r1m.init(1000);
-	r1n.init(1000);
-	r2m.init(1000);
-	r2n.init(1000);
-	r3m.init(1000);
-	r3n.init(1000);
-	r4m.init(1000);
-	r4n.init(1000);
-	r5m.init(1000);
-	r5n.init(1000);
-	r6m.init(1000);
-	r6n.init(1000);
+	track.init(10000);
 
 	fvec posm = zeros<fvec>(2);
 	fvec posn = zeros<fvec>(2);
@@ -497,17 +484,14 @@ int main()
 
 	get_xy(pos, vv);
 
-	int count = 0;
-	tt.update(target);
-	count++;
-
-	rls1.do_measure(target, posm, posn);	
-	r1m.update(posm);
-	r1n.update(posn);
-
 
 	std::vector<rls_t> rlist;
+	rlist.push_back(rls1);
+	rlist.push_back(rls2);
+	rlist.push_back(rls3);
 	rlist.push_back(rls4);
+	rlist.push_back(rls5);
+	rlist.push_back(rls6);
 
 	target_t t1;
 	t1.init();
@@ -520,8 +504,7 @@ int main()
 	float ttx_max = 3500.0f;
 	float dtt = 1.0f;
 
-	ttt.push_back(ttx);
-	push_data(t1.pos_);
+	track.update(ttx, t1.pos_);
 
 	while( ttx <= ttx_max )
 	{
@@ -560,7 +543,7 @@ int main()
 				if( ri->crossed_ray(ti->pos_, ti->posn_) )
 				{
 					ri->do_measure(ti->posn_, posm, posn);
-					push_data(posn);
+					ri->track_.update(ttx+dtt, posn);
 				}
 			}
 
@@ -576,7 +559,7 @@ int main()
 				if( ri->crossed_target(ti->posn_) )
 				{
 					ri->do_measure(ti->posn_, posm, posn);
-					push_data(posn);
+					ri->track_.update(ttx+dtt, posn);
 				}
 			}
 
@@ -584,10 +567,12 @@ int main()
 		}
 
 		ttx += dtt;
-		ttt.push_back(ttx);
+		auto ti = tlist.begin();
+		track.update(ttx, ti->pos_);
 	}
 
-	plt::plot(xxx, yyy);
+	for( auto ri=rlist.begin(); ri != rlist.end(); ++ri )
+		plt::plot(ri->track_.x_, ri->track_.y_);
 //	plt::xlim(-400000.0f, 400000.0f);
 //	plt::ylim(-100000.0f, 100000.0f);
 	plt::grid(true);
