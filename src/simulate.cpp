@@ -125,6 +125,235 @@ bool north_crossed(const float f1, const float f2)
 	return rc;
 }
 
+typedef struct gh_filter_
+{
+	void init(const float g, const float h)
+	{
+		g_ = g;
+		h_ = h;
+	}
+	void set_initial(const fvec& pv)
+	{
+		pv_ = zeros<fvec>(2);
+		pv_ = pv;
+	}
+	void set_initial(const float p, const float v)
+	{
+		pv_ = zeros<fvec>(2);
+
+		pv_(0) = p;
+		pv_(1) = v;
+	}
+	float update(const float dt, const float p)
+	{
+		float p_pred = pv_(0) + pv_(1)*dt;
+		pv_(1) = pv_(1);
+
+		float residual = p - p_pred;
+		pv_(1) += h_ * residual / dt;
+		pv_(0) = p_pred + g_ * residual;
+
+		return pv_(0);
+	}
+	fvec pv_;
+	float g_, h_;
+} gh_filter;
+
+typedef struct
+{
+	void init(const int order, const float g, const float h, const float k, const float dt)
+	{
+		order_ = std::max(0, std::min(2, order));
+		x_ = zeros<fvec>(3);
+
+		dt_ = dt;
+		g_ = g;
+		h_ = h;
+		k_ = k;
+	}
+	void init(const fvec& x0)
+	{
+		x_(0) = x0(0);
+		if( x0.size() > 1 )
+			x_(1) = x0(1);
+		if( x0.size() > 2 )
+			x_(2) = x0(2);
+	}
+	void update(float dt, const float z, float g, float h, float k)
+	{
+		float y, x, dx, ddx, dxdt, T2;
+
+		if( dt < 0.0f )
+			dt = dt_;
+
+		switch( order_ )
+		{
+			case 0:
+				if( g < 0.0f )
+					g = g_;
+
+				y = z - x_(0);
+				x_(0) += g * y;
+				break;
+
+			case 1:
+				if( g < 0.0f )
+					g = g_;
+
+				if( h < 0.0f )
+					h = h_;
+
+				x = x_(0);
+				dx = x_(1);
+				dxdt = dx * dt;
+
+				y = z - (x + dxdt);
+			       	x_(0) = x + dxdt + g * y;
+				x_(1) = dx + h * y / dt;
+				break;
+
+			case 2:
+				if( g < 0.0f )
+					g = g_;
+
+				if( h < 0.0f )
+					h = h_;
+
+				if( k < 0.0f )
+					k = k_;
+
+				x = x_(0);
+				dx = x_(1);
+				ddx = x_(2);
+				dxdt = dx * dt;
+
+				T2 = dt * dt;
+
+				y = z - (x + dxdt + 0.5f * ddx * T2);
+
+				x_(0) = x + dxdt + 0.5f * ddx * T2 + g / y;
+				x_(1) = dx + ddx * dt_ + h * y / dt;
+				x_(2) = ddx + 2.0f * k * y / T2;
+				break;
+		}
+	}
+	fvec x_;
+	float dt_;
+	int order_;
+	float g_;
+	float h_;
+	float k_;
+} GHFilterOrder_t;
+
+typedef struct
+{
+	void init(const float g, const float h, const float k, const float dt)
+	{
+		x_ = zeros<fvec>(3);
+		x_pred_ = zeros<fvec>(3);
+
+		dt_ = dt;
+		g_ = g;
+		h_ = h;
+		k_ = k;
+	}
+	void init(const fvec& x0)
+	{
+		x_(0) = x0(0);
+		if( x0.size() > 1 )
+			x_(1) = x0(1);
+		if( x0.size() > 2 )
+			x_(2) = x0(2);
+
+		x_pred_ = x_;
+	}
+	void init(const float x, const float dx, const float ddx)
+	{
+		x_(0) = x;
+		x_(1) = dx;
+		x_(2) = ddx;
+
+		x_pred_ = x_;
+	}
+	float update(float dt, const float z, float g, float h, float k)
+	{
+		float y;
+
+		if( dt < 0.0f )
+			dt = dt_;
+		
+		if( g < 0.0f )
+			g = g_;
+
+		if( h < 0.0f )
+			h = h_;
+
+		if( k < 0.0f )
+			k = k_;
+
+		float dt_sqr = dt * dt;
+		x_pred_(2) = x_(2);
+		x_pred_(1) = x_(1) + x_(2) * dt;
+		x_pred_(0) = x_(0) + x_(1) * dt + 0.5f * x_(2) * dt_sqr;
+
+		y = z - x_pred_(0);
+
+		x_(2) = x_pred_(2) + 2.0f * k * y / dt_sqr;
+		x_(1) = x_pred_(1) + h * y / dt;
+		x_(0) = x_pred_(0) + g * y;
+
+		return x_(0);
+	}
+	void ons(const float g, float& h, float& k)
+	{
+		float g2 = g*g;
+		float g3 = g2*g;
+		float g4 = g2*g2;
+		float g5 = g2*g3;
+		float g6 = g4*g2;
+
+		h = ((2.0f*g3 - 4.0f*g2) + sqrt(4.0f*g6 -64.0f*g5 + 64.0f*g4)) / (8.0f*(1.0f-g));
+		k = (h*(2.0f-g) - g2) / g;
+	}
+	void dumping(float theta, float &g, float&h, float &k)
+	{
+		theta = std::max(0.0f, std::min(1.0f, theta));
+
+		float theta2 = theta * theta;
+		float theta3 = theta2 * theta;
+
+		g = 1.0f - theta3;
+		h = 1.5f * (1.0f - theta2) * (1.0f - theta);
+
+		float th = (1.0f - theta);
+		k = 0.5f * th * th * th;
+	}
+	void vrf(float &vx, float &vdx, float &vddx)
+	{
+		float hg4 = 4.0f - 2.0f*g_ - h_;
+		float ghk = g_*h_ + g_*k_ - 2.0f*k_;
+
+		vx = (2.0f*h_*(2.0f*g_*g_ + 2.0f*h_ - 3.0f*g_*h_) - 2.0f*g_*k_*hg4) / (2.0f*k_ - g_*(h_+k_)*hg4);
+		vdx = (2.0f*h_*h_*h_ - 4.0f*h_*h_*k_ + 4.0f*k_*k_*(2.0f-g_)) / (2.0f*hg4*ghk);
+		vddx = 8.0f*h_*k_*k_ / (dt_*dt_*dt_*dt_*hg4*ghk);
+	}
+	float vrf_pred()
+	{
+		float gh2 = 2.0f*g_ + h_;
+
+		float ret = (g_*k_*(gh2-4.0f) + h_*(g_*gh2+2.0f*h_)) /
+			(2.0f*k_ - (g_*(h_+k_)*(gh2-4.0f)));
+
+		return ret;
+	}
+	fvec x_;
+	fvec x_pred_;
+	float dt_;
+	float g_;
+	float h_;
+	float k_;
+} GHFilter_t;
+
 typedef struct _track_t
 {
 	void init(int count)
@@ -133,6 +362,17 @@ typedef struct _track_t
 		y_.reserve(count);
 		h_.reserve(count);
 		t_.reserve(count);
+
+		float g, h, k;
+//		g = 0.5f;
+
+//		fx_.ons(g, h, k);
+
+		float theta = 0.9f;
+		fx_.dumping(theta, g, h, k);
+
+		fx_.init(g, h, k, 1.0f);
+		fy_.init(g, h, k, 1.0f);
 	}
 	void shrink()
 	{
@@ -151,6 +391,25 @@ typedef struct _track_t
 
 		if( data.size() > 3 )
 			t_.push_back(data(3));
+
+		if( xs_.size() > 2 )
+		{
+			xs_.push_back(fx_.update(1.0f, data(0), -1., -1., -1.));
+			ys_.push_back(fy_.update(1.0f, data(1), -1., -1., -1.));
+		}
+		else
+		{
+			xs_.push_back(data(0));
+			ys_.push_back(data(1));
+			if( 1 == xs_.size() )
+			{
+				float dx = data(0) - xs_[0];
+				float dy = data(1) - ys_[0];
+
+				fx_.init(data(0), dx, 0.0f);
+				fy_.init(data(1), dy, 0.0f);
+			}
+		}
 	}
 	void update(const float t, const fvec& data)
 	{
@@ -160,9 +419,29 @@ typedef struct _track_t
 		if( data.size() > 2 )
 			h_.push_back(data(2));
 
+		if( xs_.size() > 2 )
+		{
+			xs_.push_back(fx_.update(1.0f, data(0), -1., -1., -1.));
+			ys_.push_back(fy_.update(1.0f, data(1), -1., -1., -1.));
+		}
+		else
+		{
+			xs_.push_back(data(0));
+			ys_.push_back(data(1));
+			if( 1 == xs_.size() )
+			{
+				float dx = data(0) - xs_[0];
+				float dy = data(1) - ys_[0];
+
+				fx_.init(data(0), dx, 0.0f);
+				fy_.init(data(1), dy, 0.0f);
+			}
+		}
 		t_.push_back(t);
 	}
 	std::vector<float> x_, y_, h_, t_;
+	std::vector<float> xs_, ys_;
+	GHFilter_t fx_, fy_;
 } track_t;
 
 typedef struct _rls_t
@@ -417,6 +696,7 @@ typedef struct
 
 int main() 
 {
+#if 0	
 	init_global();
 
 	rls_t rls1, rls2, rls3, rls4, rls5, rls6;
@@ -474,16 +754,11 @@ int main()
 	float v = 250.0f; // скорость
 	float f = 265.0f; // курс
 
-	float dt = 5.0f;
+	float dt = 1.0f;
 
 	fvec pos = zeros<fvec>(2);
 	pos(0) = v;
 	pos(1) = f / radian;
-
-	fvec vv = zeros<fvec>(2);
-
-	get_xy(pos, vv);
-
 
 	std::vector<rls_t> rlist;
 	rlist.push_back(rls1);
@@ -502,7 +777,6 @@ int main()
 
 	float ttx = 0.0f;
 	float ttx_max = 3500.0f;
-	float dtt = 1.0f;
 
 	track.update(ttx, t1.pos_);
 
@@ -536,43 +810,206 @@ int main()
 				ti->set_f(15.0f, 327.0f);
 #endif
 
-			ti->update_pre(dtt);
+			ti->update_pre(dt);
 
 			for( auto ri=rlist.begin(); ri != rlist.end(); ++ri )
 			{
 				if( ri->crossed_ray(ti->pos_, ti->posn_) )
 				{
 					ri->do_measure(ti->posn_, posm, posn);
-					ri->track_.update(ttx+dtt, posn);
+					ri->track_.update(ttx+dt, posn);
 				}
 			}
 
-			ti->update_end(dtt);
+			ti->update_end(dt);
 		}
 
 		for( auto ri=rlist.begin(); ri != rlist.end(); ++ri )
 		{
-			ri->do_rotate_pre(dtt);
+			ri->do_rotate_pre(dt);
 
 			for( auto ti=tlist.begin(); ti != tlist.end(); ++ti )
 			{
 				if( ri->crossed_target(ti->posn_) )
 				{
 					ri->do_measure(ti->posn_, posm, posn);
-					ri->track_.update(ttx+dtt, posn);
+					ri->track_.update(ttx+dt, posn);
 				}
 			}
 
 			ri->do_rotate_end();
 		}
 
-		ttx += dtt;
+		ttx += dt;
 		auto ti = tlist.begin();
 		track.update(ttx, ti->pos_);
 	}
 
+	track.shrink();
+	plt::plot(track.x_, track.y_);
+
 	for( auto ri=rlist.begin(); ri != rlist.end(); ++ri )
+	{
+		ri->track_.shrink();
 		plt::plot(ri->track_.x_, ri->track_.y_);
+	}
+//	plt::xlim(-400000.0f, 400000.0f);
+//	plt::ylim(-100000.0f, 100000.0f);
+	plt::grid(true);
+	plt::save("./simulate.png");
+	plt::show();
+#endif	
+
+/*
+	std::vector<float> weight = {158.0f, 164.2f, 160.3f, 159.9f, 162.1f, 164.6f, 169.6f, 167.4f, 166.4f, 171.0f, 171.2f, 172.6f};
+	gh_filter ghf;
+
+	ghf.init(6.0f/10.0f, 2.0f/3.0f);
+	ghf.set_initial(160.0f, 1.0f);
+
+	std::vector<float> tt, xx;
+
+	float dt = 1.0f, t = 0.0f;
+
+	for( auto wi = weight.begin(); wi != weight.end(); ++wi )
+	{
+		xx.push_back(ghf.update(dt, *wi));
+		
+		tt.push_back(t);
+		t += dt;
+	}
+
+	plt::plot(tt, xx);
+	plt::grid(true);
+	plt::save("./simulate.png");
+	plt::show();
+*/	
+	init_global();
+
+	rls_t rls1;
+
+	rls1.init();
+	rls1.set_pos(500.0f, 300.f, 20.0f);
+	rls1.set_cko(60.0f, 0.1f/radian);
+	rls1.set_rotate(5.0f);
+	rls1.set_az(360.0f*randu());
+
+
+	fvec target = zeros<fvec>(3);
+
+	target(0) = 400000.0f;
+	target(1) = 50000.0f;
+	target(2) = 10000.0f;
+
+	track_t track;
+
+	track.init(10000);
+
+	fvec posm = zeros<fvec>(2);
+	fvec posn = zeros<fvec>(2);
+
+
+	float v = 250.0f; // скорость
+	float f = 265.0f; // курс
+
+	float dt = 1.0f;
+
+	fvec pos = zeros<fvec>(2);
+	pos(0) = v;
+	pos(1) = f / radian;
+
+	std::vector<rls_t> rlist;
+	rlist.push_back(rls1);
+
+	target_t t1;
+	t1.init();
+	t1.set(target, pos(0), pos(1));
+
+	std::vector<target_t> tlist;
+	tlist.push_back(t1);
+
+	float ttx = 0.0f;
+	float ttx_max = 3500.f;
+
+	track.update(ttx, t1.pos_);
+
+	while( ttx <= ttx_max )
+	{
+		for( auto ti=tlist.begin(); ti != tlist.end(); ++ti )
+		{
+#if 0			
+			if( ttx == 20.0f )
+				ti->set_speed(5.0f, 180.0f);
+
+			if( ttx == 40.0f )
+				ti->set_speed(2.0f, 200.0f);
+
+			if( ttx == 10.0f )
+				ti->set_height(12.0f, 8600.f);
+
+			if( ttx == 200.0f )
+				ti->set_f(30.0f, 345.0f);
+
+			if( ttx == 210.0f )
+				ti->set_speed(5.0f, 250.0f);
+
+			if( ttx == 300.0f )
+				ti->set_f(10.0f, 320.0f);
+
+			if( ttx == 400.0f )
+				ti->set_f(10.0f, 20.0f);
+
+			if( ttx == 600.0f )
+				ti->set_f(15.0f, 327.0f);
+#endif
+
+			ti->update_pre(dt);
+
+			for( auto ri=rlist.begin(); ri != rlist.end(); ++ri )
+			{
+				if( ri->crossed_ray(ti->pos_, ti->posn_) )
+				{
+					ri->do_measure(ti->posn_, posm, posn);
+					ri->track_.update(ttx+dt, posn);
+				}
+			}
+
+			ti->update_end(dt);
+		}
+
+		for( auto ri=rlist.begin(); ri != rlist.end(); ++ri )
+		{
+			ri->do_rotate_pre(dt);
+
+			for( auto ti=tlist.begin(); ti != tlist.end(); ++ti )
+			{
+				if( ri->crossed_target(ti->posn_) )
+				{
+					ri->do_measure(ti->posn_, posm, posn);
+					ri->track_.update(ttx+dt, posn);
+				}
+			}
+
+			ri->do_rotate_end();
+		}
+
+		ttx += dt;
+		auto ti = tlist.begin();
+		track.update(ttx, ti->pos_);
+	}
+
+	track.shrink();
+	plt::plot(track.x_, track.y_);
+
+	cout << track.x_.size();
+
+	for( auto ri=rlist.begin(); ri != rlist.end(); ++ri )
+	{
+		ri->track_.shrink();
+		cout << " " << ri->track_.xs_.size() << endl;
+		plt::plot(ri->track_.x_, ri->track_.y_);
+		plt::plot(ri->track_.xs_, ri->track_.ys_);
+	}
 //	plt::xlim(-400000.0f, 400000.0f);
 //	plt::ylim(-100000.0f, 100000.0f);
 	plt::grid(true);
