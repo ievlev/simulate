@@ -125,126 +125,6 @@ bool north_crossed(const float f1, const float f2)
 	return rc;
 }
 
-typedef struct gh_filter_
-{
-	void init(const float g, const float h)
-	{
-		g_ = g;
-		h_ = h;
-	}
-	void set_initial(const fvec& pv)
-	{
-		pv_ = zeros<fvec>(2);
-		pv_ = pv;
-	}
-	void set_initial(const float p, const float v)
-	{
-		pv_ = zeros<fvec>(2);
-
-		pv_(0) = p;
-		pv_(1) = v;
-	}
-	float update(const float dt, const float p)
-	{
-		float p_pred = pv_(0) + pv_(1)*dt;
-		pv_(1) = pv_(1);
-
-		float residual = p - p_pred;
-		pv_(1) += h_ * residual / dt;
-		pv_(0) = p_pred + g_ * residual;
-
-		return pv_(0);
-	}
-	fvec pv_;
-	float g_, h_;
-} gh_filter;
-
-typedef struct
-{
-	void init(const int order, const float g, const float h, const float k, const float dt)
-	{
-		order_ = std::max(0, std::min(2, order));
-		x_ = zeros<fvec>(3);
-
-		dt_ = dt;
-		g_ = g;
-		h_ = h;
-		k_ = k;
-	}
-	void init(const fvec& x0)
-	{
-		x_(0) = x0(0);
-		if( x0.size() > 1 )
-			x_(1) = x0(1);
-		if( x0.size() > 2 )
-			x_(2) = x0(2);
-	}
-	void update(float dt, const float z, float g, float h, float k)
-	{
-		float y, x, dx, ddx, dxdt, T2;
-
-		if( dt < 0.0f )
-			dt = dt_;
-
-		switch( order_ )
-		{
-			case 0:
-				if( g < 0.0f )
-					g = g_;
-
-				y = z - x_(0);
-				x_(0) += g * y;
-				break;
-
-			case 1:
-				if( g < 0.0f )
-					g = g_;
-
-				if( h < 0.0f )
-					h = h_;
-
-				x = x_(0);
-				dx = x_(1);
-				dxdt = dx * dt;
-
-				y = z - (x + dxdt);
-			       	x_(0) = x + dxdt + g * y;
-				x_(1) = dx + h * y / dt;
-				break;
-
-			case 2:
-				if( g < 0.0f )
-					g = g_;
-
-				if( h < 0.0f )
-					h = h_;
-
-				if( k < 0.0f )
-					k = k_;
-
-				x = x_(0);
-				dx = x_(1);
-				ddx = x_(2);
-				dxdt = dx * dt;
-
-				T2 = dt * dt;
-
-				y = z - (x + dxdt + 0.5f * ddx * T2);
-
-				x_(0) = x + dxdt + 0.5f * ddx * T2 + g / y;
-				x_(1) = dx + ddx * dt_ + h * y / dt;
-				x_(2) = ddx + 2.0f * k * y / T2;
-				break;
-		}
-	}
-	fvec x_;
-	float dt_;
-	int order_;
-	float g_;
-	float h_;
-	float k_;
-} GHFilterOrder_t;
-
 typedef struct
 {
 	void init(const float g, const float h, const float k, const float dt)
@@ -694,196 +574,40 @@ typedef struct
 	float cmd_f_, cmd_gamma_;
 } target_t;
 
+void time_command_1(const float ttx, target_t *ti)
+{
+	if( ttx == 20.0f )
+		ti->set_speed(5.0f, 180.0f);
+
+	if( ttx == 40.0f )
+		ti->set_speed(2.0f, 200.0f);
+
+	if( ttx == 10.0f )
+		ti->set_height(12.0f, 8600.f);
+
+	if( ttx == 200.0f )
+		ti->set_f(30.0f, 345.0f);
+
+	if( ttx == 210.0f )
+		ti->set_speed(5.0f, 250.0f);
+
+	if( ttx == 300.0f )
+		ti->set_f(10.0f, 320.0f);
+
+	if( ttx == 400.0f )
+		ti->set_f(10.0f, 20.0f);
+
+	if( ttx == 600.0f )
+		ti->set_f(15.0f, 327.0f);
+}
+
+void time_command(const float ttx, target_t *ti)
+{
+//	time_command_1(ttx, ti);
+}
+#if 0
 int main() 
 {
-#if 0	
-	init_global();
-
-	rls_t rls1, rls2, rls3, rls4, rls5, rls6;
-
-	rls1.init();
-	rls1.set_pos(500.0f, 300.f, 20.0f);
-	rls1.set_cko(60.0f, 0.1f/radian);
-	rls1.set_rotate(5.0f);
-	rls1.set_az(360.0f*randu());
-
-	rls2.init();
-	rls2.set_pos(3000.0f, -2000.0f, 100.0f);
-	rls2.set_cko(300.0f, 0.2f/radian);
-	rls2.set_rotate(10.0f);
-	rls2.set_az(360.0f*randu());
-
-	rls3.init();
-	rls3.set_pos(100000.0f, 100000.0f, 200.0f);
-	rls3.set_cko(150.0f, 0.15f/radian);
-	rls3.set_rotate(10.0f);
-	rls3.set_az(360.0f*randu());
-
-	rls4.init();
-	rls4.set_pos(100000.0f, -100000.0f, 700.0f);
-	rls4.set_cko(300.0f, 0.2f/radian);
-	rls4.set_rotate(20.0f);
-	rls4.set_az(360.0f*randu());
-
-	rls5.init();
-	rls5.set_pos(-100000.0f, -100000.0f, 100.0f);
-	rls5.set_cko(150.0f, 0.15f/radian);
-	rls5.set_rotate(10.0f);
-	rls5.set_az(360.0f*randu());
-
-	rls6.init();
-	rls6.set_pos(-100000.0f, 100000.0f, 70.0f);
-	rls6.set_cko(300.0f, 0.2f/radian);
-	rls6.set_rotate(20.0f);
-	rls6.set_az(360.0f*randu());
-
-	fvec target = zeros<fvec>(3);
-
-	target(0) = 400000.0f;
-	target(1) = 50000.0f;
-	target(2) = 10000.0f;
-
-	track_t track;
-
-	track.init(10000);
-
-	fvec posm = zeros<fvec>(2);
-	fvec posn = zeros<fvec>(2);
-
-
-	float v = 250.0f; // скорость
-	float f = 265.0f; // курс
-
-	float dt = 1.0f;
-
-	fvec pos = zeros<fvec>(2);
-	pos(0) = v;
-	pos(1) = f / radian;
-
-	std::vector<rls_t> rlist;
-	rlist.push_back(rls1);
-	rlist.push_back(rls2);
-	rlist.push_back(rls3);
-	rlist.push_back(rls4);
-	rlist.push_back(rls5);
-	rlist.push_back(rls6);
-
-	target_t t1;
-	t1.init();
-	t1.set(target, pos(0), pos(1));
-
-	std::vector<target_t> tlist;
-	tlist.push_back(t1);
-
-	float ttx = 0.0f;
-	float ttx_max = 3500.0f;
-
-	track.update(ttx, t1.pos_);
-
-	while( ttx <= ttx_max )
-	{
-		for( auto ti=tlist.begin(); ti != tlist.end(); ++ti )
-		{
-#if 0			
-			if( ttx == 20.0f )
-				ti->set_speed(5.0f, 180.0f);
-
-			if( ttx == 40.0f )
-				ti->set_speed(2.0f, 200.0f);
-
-			if( ttx == 10.0f )
-				ti->set_height(12.0f, 8600.f);
-
-			if( ttx == 200.0f )
-				ti->set_f(30.0f, 345.0f);
-
-			if( ttx == 210.0f )
-				ti->set_speed(5.0f, 250.0f);
-
-			if( ttx == 300.0f )
-				ti->set_f(10.0f, 320.0f);
-
-			if( ttx == 400.0f )
-				ti->set_f(10.0f, 20.0f);
-
-			if( ttx == 600.0f )
-				ti->set_f(15.0f, 327.0f);
-#endif
-
-			ti->update_pre(dt);
-
-			for( auto ri=rlist.begin(); ri != rlist.end(); ++ri )
-			{
-				if( ri->crossed_ray(ti->pos_, ti->posn_) )
-				{
-					ri->do_measure(ti->posn_, posm, posn);
-					ri->track_.update(ttx+dt, posn);
-				}
-			}
-
-			ti->update_end(dt);
-		}
-
-		for( auto ri=rlist.begin(); ri != rlist.end(); ++ri )
-		{
-			ri->do_rotate_pre(dt);
-
-			for( auto ti=tlist.begin(); ti != tlist.end(); ++ti )
-			{
-				if( ri->crossed_target(ti->posn_) )
-				{
-					ri->do_measure(ti->posn_, posm, posn);
-					ri->track_.update(ttx+dt, posn);
-				}
-			}
-
-			ri->do_rotate_end();
-		}
-
-		ttx += dt;
-		auto ti = tlist.begin();
-		track.update(ttx, ti->pos_);
-	}
-
-	track.shrink();
-	plt::plot(track.x_, track.y_);
-
-	for( auto ri=rlist.begin(); ri != rlist.end(); ++ri )
-	{
-		ri->track_.shrink();
-		plt::plot(ri->track_.x_, ri->track_.y_);
-	}
-//	plt::xlim(-400000.0f, 400000.0f);
-//	plt::ylim(-100000.0f, 100000.0f);
-	plt::grid(true);
-	plt::save("./simulate.png");
-	plt::show();
-#endif	
-
-/*
-	std::vector<float> weight = {158.0f, 164.2f, 160.3f, 159.9f, 162.1f, 164.6f, 169.6f, 167.4f, 166.4f, 171.0f, 171.2f, 172.6f};
-	gh_filter ghf;
-
-	ghf.init(6.0f/10.0f, 2.0f/3.0f);
-	ghf.set_initial(160.0f, 1.0f);
-
-	std::vector<float> tt, xx;
-
-	float dt = 1.0f, t = 0.0f;
-
-	for( auto wi = weight.begin(); wi != weight.end(); ++wi )
-	{
-		xx.push_back(ghf.update(dt, *wi));
-		
-		tt.push_back(t);
-		t += dt;
-	}
-
-	plt::plot(tt, xx);
-	plt::grid(true);
-	plt::save("./simulate.png");
-	plt::show();
-*/	
 	init_global();
 
 	rls_t rls1;
@@ -937,31 +661,7 @@ int main()
 	{
 		for( auto ti=tlist.begin(); ti != tlist.end(); ++ti )
 		{
-#if 0			
-			if( ttx == 20.0f )
-				ti->set_speed(5.0f, 180.0f);
-
-			if( ttx == 40.0f )
-				ti->set_speed(2.0f, 200.0f);
-
-			if( ttx == 10.0f )
-				ti->set_height(12.0f, 8600.f);
-
-			if( ttx == 200.0f )
-				ti->set_f(30.0f, 345.0f);
-
-			if( ttx == 210.0f )
-				ti->set_speed(5.0f, 250.0f);
-
-			if( ttx == 300.0f )
-				ti->set_f(10.0f, 320.0f);
-
-			if( ttx == 400.0f )
-				ti->set_f(10.0f, 20.0f);
-
-			if( ttx == 600.0f )
-				ti->set_f(15.0f, 327.0f);
-#endif
+			time_command(ttx, &(*ti));
 
 			ti->update_pre(dt);
 
@@ -1015,5 +715,180 @@ int main()
 	plt::grid(true);
 	plt::save("./simulate.png");
 	plt::show();
+
   return 0;
 }
+#endif
+
+void fillx(fmat& amat, int dim)
+{
+//	amat.set_size(dim,dim);
+//	amat.randu(dim,dim);
+	amat = eye<fmat>(dim, dim);
+}
+
+void filly(fmat& amat, int dim, float dt)
+{
+//	amat.set_size(dim,dim);
+//	amat.randu(dim,dim);
+	amat = { {1., 2., 3.}, {4., 5., 6.}, {7., 8., 9.} };
+}
+
+float power(float x, int n)
+{
+	float a = 1.0f;
+
+	while( n )
+	{
+		if( n % 2 )
+		{
+			a *= x;
+			--n;
+		}
+		else
+		{
+			x *= x;
+			n >>= 1;
+		}
+	}
+
+	return a;
+
+}
+
+void Q_continuous_white_noise(int dim, float dt, float var, int block_size, bool order, fmat& q)
+{
+	fmat a;
+	int N = dim * block_size;
+
+	if( (dim < 2) || (dim > 4) )
+	{
+		cout << "wrong size " << dim << endl;
+	}
+
+	if( 2 == dim )
+	{
+		a = { {power(dt,3)/3.0f, power(dt,2)/2.0f}, {power(dt,2)/2.0f, dt} };
+		q = zeros<fmat>(N,N);
+
+		q.submat(0,0,1,1) = a;
+		q.submat(2,2,3,3) = a;
+		q.submat(4,4,5,5) = a;
+	}
+	else if( 3 == dim )
+	{
+		a = { {power(dt,5)/20.0f, power(dt,4)/8.0f, power(dt,3)/6.0f}, 
+		      {power(dt,4)/8.0f,  power(dt,3)/3.0f, power(dt,2)/2.0f}, 
+		      {power(dt,3)/6.0f,  power(dt,2)/2.0f, dt} };
+
+		q = zeros<fmat>(N,N);
+
+		q.submat(0,2,0,2) = a;
+		q.submat(3,5,3,5) = a;
+		q.submat(6,8,6,8) = a;
+	}
+	else
+	{
+		a = { {power(dt,7)/252.f, power(dt,6)/72.f, power(dt,5)/30.0f, power(dt,4)/24.f}, 
+		      {power(dt,6)/72.f, power(dt,5)/20.0f, power(dt,4)/8.0f, power(dt,3)/6.0f}, 
+		      {power(dt,5)/30.0f, power(dt,4)/8.0f, power(dt,3)/3.0f, power(dt,2)/2.0f}, 
+		      {power(dt,4)/24.0f, power(dt,3)/6.0f, power(dt,2)/2.0f, dt} };
+
+		q = zeros<fmat>(N,N);
+
+		q.submat(0,3,0,3) = a;
+		q.submat(4,7,4,7) = a;
+		q.submat(8,11,8,11) = a;
+	}
+
+	q *= var;
+}
+void Q_discrete_white_noise(int dim, float dt, float var, int block_size, bool order, fmat& q)
+{
+	fmat a;
+	int N = dim * block_size;
+
+	if( (dim < 2) || (dim > 4) )
+	{
+		cout << "wrong size " << dim << endl;
+	}
+
+	if( 2 == dim )
+	{
+		a = { {0.25f*power(dt,4), 0.5f*power(dt,3)}, {0.5f*power(dt,3), power(dt,2)} };
+		q = zeros<fmat>(N,N);
+
+		q.submat(0,0,1,1) = a;
+		q.submat(2,2,3,3) = a;
+		q.submat(4,4,5,5) = a;
+	}
+	else if( 3 == dim )
+	{
+		a = { {0.25f*power(dt,4), 0.5f*power(dt,3), 0.5f*power(dt,2)}, 
+		      {0.5f*power(dt,3),  power(dt,2), dt}, 
+		      {0.5f*power(dt,2),  dt, 1.0f} };
+
+		q = zeros<fmat>(N,N);
+
+		q.submat(0,0,2,2) = a;
+		q.submat(3,3,5,5) = a;
+		q.submat(6,6,8,8) = a;
+	}
+	else
+	{
+		a = { {power(dt,6)/36.f, power(dt,5)/12.f, power(dt,4)/6.0f, power(dt,3)/6.f}, 
+		      {power(dt,5)/12.f, power(dt,4)/4.0f, power(dt,3)/2.0f, power(dt,2)/2.0f}, 
+		      {power(dt,4)/6.0f, power(dt,3)/2.0f, power(dt,2), dt}, 
+		      {power(dt,3)/6.0f, power(dt,2)/2.0f, dt, 1.0f} };
+
+		q = zeros<fmat>(N,N);
+
+		q.submat(0,0,3,3) = a;
+		q.submat(4,4,7,7) = a;
+		a.submat(8,8,11,11) = a;
+	}
+
+	q *= var;
+}
+
+void van_loan_diskretization(const fvec& F, const fvec& G, const float dt, fvec&sigma, fvec& Q)
+{
+}
+
+int main()
+{
+	fmat A, B, F, x, y, z;
+	fmat G;
+
+	float dt = 0.1f;
+	F = {{0.0f, 1.0f}, {-1.0f, 0.0f}};
+	G = {0.0f, 2.0f};
+	
+	x = zeros<fmat>(G.size(), G.size());
+	x.tail_rows(1) = G;
+
+
+
+	y = zeros<fmat>(G.size(), G.size());
+	y.tail_cols(1) = G.t();
+
+
+	z = x*y;
+//	z.print();
+
+	int n = F.n_rows;
+	A = zeros<fmat>(2*n,2*n);
+
+	A.submat(0,0,n-1,n-1) = -F*dt;
+	A.submat(0,n, n-1,2*n-1) = z*dt;
+	A.submat(n,n, 2*n-1, 2*n-1) = F.t()*dt;
+
+	A.print();
+
+	B = expmat(A);
+
+	B.print();
+
+	return 0;
+}
+
