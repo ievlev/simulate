@@ -14,6 +14,10 @@ using namespace std;
 float pi;
 float g22, g45, g67, g90, g112, g135, g157, g180, g202, g225, g247, g270, g292, g315, g337, g360, radian;
 
+float logpdf(const fcolvec& x, const fmat& cov)
+{
+}
+
 void init_global()
 {
 	pi = 4.0f * atan(1.0f);
@@ -125,6 +129,30 @@ bool north_crossed(const float f1, const float f2)
 	return rc;
 }
 
+#if 0
+float residual(const float a, const float b)
+{
+	float y = a - b;
+	y = y % (2 * pi);
+	if( y > pi )
+		y -= 2*pi;
+
+	return y;
+}
+
+float residual(const fvec& a, const fvec& b)
+{
+	float y = a[0] - b[0];
+	y = y % (2 * pi);
+	if( y > pi )
+		y -= 2*pi;
+
+	return y;
+}
+#endif
+
+enum { filter_GH = 0, filter_KF };
+
 typedef struct
 {
 	void init(const float g, const float h, const float k, const float dt)
@@ -234,9 +262,272 @@ typedef struct
 	float k_;
 } GHFilter_t;
 
+typedef struct
+{
+	void init(const int dimx, const int dimz, const int dimu=0)
+	{
+		alpha_sq = 1.0f;
+
+		dim_x = std::max(1, dimx);
+		dim_z = std::max(1, dimz);
+		dim_u = std::max(0, dimu);
+
+		_x.zeros(dim_x);
+		_P.eye(dim_x, dim_x);
+		_Q.eye(dim_x, dim_x);
+		if( dim_u > 0 )
+			_B.zeros(dim_u, dim_u);
+		_F.eye(dim_x, dim_x);
+		_H.zeros(dim_z, dim_x);
+		_R.eye(dim_z, dim_z);
+		M.zeros(dim_z, dim_z);
+		_z.zeros(dim_z);
+		K.zeros(dim_x, dim_z);
+		_y.zeros(dim_z);
+		S.zeros(dim_z, dim_z);
+		SI.zeros(dim_z, dim_z);
+		I.eye(dim_x, dim_x);
+
+		x_prior = _x;
+		P_prior = _P;
+
+		x_post = _x;
+		P_post = _P;
+
+		log_likelihood = datum::log_min;
+		likelihood = exp(datum::log_min);
+		mahalanobis = 0.0f;
+	}
+	void set_alpha(const float alpha)
+	{
+		float al = std::max(1.0f, alpha);
+		alpha_sq = al * al;
+	}
+	void predict(const fcolvec& u, const fmat& b, const fmat& f, const fmat& q)
+	{
+		fmat B, F, Q;
+
+		if( false == b.is_empty() )
+			B = b;
+		else
+			B = _B;
+
+		if( false == f.is_empty() )
+			F = f;
+		else
+			F = _F;
+
+		if( false == q.is_empty() )
+			Q = q;
+		else
+			Q = _Q;
+
+		if( (false == u.is_empty()) && (false == B.is_empty()) )
+			_x = F*_x + B*u;
+		else
+			_x = F*_x;
+
+		_P = alpha_sq*F*_P*F.t() + Q;
+
+		x_prior = _x;
+		P_prior = _P;
+	}
+	void update(const fcolvec& z, const fmat& r, const fmat& h)
+	{
+		fmat R, H;
+
+		log_likelihood = datum::nan;
+		likelihood = datum::nan;
+		mahalanobis = datum::nan;
+
+		if( false == r.is_empty() )
+			R = r;
+		else
+			R = _R;
+
+		if( false == h.is_empty() )
+			H = h;
+		else
+			H = _H;
+
+		if( true == z.is_empty() )
+		{
+			_z.reset();
+			x_post = _x;
+			P_post = _P;
+			_y.zeros();
+			return;
+		}
+
+		_y = z - H*_x;
+
+		fmat PHT = _P*H.t();
+		S = H*PHT + R;
+		SI = inv(S);
+		K = PHT*SI;
+
+		_x = _x + K*_y;
+
+		fmat I_KH = I - K*H;
+		_P = I_KH*_P*I_KH.t() + K*R*K.t();
+
+		_z = z;
+		x_post = _x;
+		P_post = _P;
+	}
+	void predict_steadystate(const fcolvec& u, const fmat& b)
+	{
+		fmat B;
+
+		if( false == b.is_empty() )
+			B = b;
+		else
+			B = _B;
+
+		if( (false == u.is_empty()) && (false == B.is_empty()) )
+			_x = _F*_x + B*u;
+		else
+			_x = _F*_x;
+
+		x_prior = _x;
+		P_prior = _P;
+	}
+	void update_steadystate(const fcolvec& z)
+	{
+		log_likelihood = datum::nan;
+		likelihood = datum::nan;
+		mahalanobis = datum::nan;
+
+		if( true == z.is_empty() )
+		{
+			_z.reset();
+			x_post = _x;
+			P_post = _P;
+			_y.zeros();
+			return;
+		}
+
+		_y = z - _H*_x;
+
+		_x = _x + K*_y;
+
+		_z = z;
+		x_post = _x;
+		P_post = _P;
+	}
+	void update_correlated(const fcolvec& z, const fmat& r, const fmat& h)
+	{
+		fmat R, H;
+
+		log_likelihood = datum::nan;
+		likelihood = datum::nan;
+		mahalanobis = datum::nan;
+
+		if( false == r.is_empty() )
+			R = r;
+		else
+			R = _R;
+
+		if( false == h.is_empty() )
+			H = h;
+		else
+			H = _H;
+
+		if( true == z.is_empty() )
+		{
+			_z.reset();
+			x_post = _x;
+			P_post = _P;
+			_y.zeros();
+			return;
+		}
+
+		_y = z - H*_x;
+
+		fmat PHT = _P*H.t();
+		S = H*PHT + H*M + M.t()*H.t() + R;
+		SI = inv(S);
+		K = (PHT+M)*SI;
+
+		_x = _x + K*_y;
+		_P = _P - K*(H*_P + M.t());
+
+		_z = z;
+		x_post = _x;
+		P_post = _P;
+	}
+	void get_prediction(const fcolvec& u, fcolvec& x, fmat& P)
+	{
+		if( (false == u.is_empty()) && (false == _B.is_empty()) )
+			x = _F*_x + _B*u;
+		else
+			x = _F*_x;
+
+		P = alpha_sq*_F*_P*_F.t() + _Q;
+	}
+	void get_update(const fcolvec& z, fcolvec& x, fmat& P)
+	{
+		if( true == z.is_empty() )
+		{
+			x = _x;
+			P = _P;
+			return;
+		}
+
+		fmat R = _R;
+		fmat H = _H;
+		P = _P;
+		x = _x;
+
+		fcolvec y = z - H*x;
+		fmat PHT = P*H.t();
+
+		fmat s = H*PHT + R;
+		fmat k = PHT*inv(s);
+		x = x + k*y;
+
+		fmat i_kh = I - k*H;
+		P = i_kh*P*i_kh.t() + k*R*k.t();
+	}
+	void residual(const fcolvec& z, fcolvec zo)
+	{
+		zo = z - _H*x_prior;
+	}
+	void measurement_of_state(const fcolvec& x, fcolvec& zo)
+	{
+		zo = _H*x;
+	}
+	float calc_log_likelihood()
+	{
+		return logpdf(_y, S);
+	}
+	float calc_mahalanobis()
+	{
+		if( datum::nan == mahalanobis )
+		{
+			fmat m = _y.t()*SI*_y;
+			mahalanobis = sqrt(m(0));
+		}
+
+		return mahalanobis;
+	}
+	float alpha_sq;
+	int dim_x;
+	int dim_z;
+	int dim_u;
+
+	float likelihood, log_likelihood, mahalanobis;
+
+	fcolvec _x, x_prior, x_post;
+	fcolvec _y;
+	fcolvec _z;
+	fmat _P, P_prior, P_post;
+	fmat _Q, _R, _H, _F, _B, M, K, S, SI, I;
+} KFFilter_t;
+
 typedef struct _track_t
 {
-	void init(int count)
+	void init(int count, int filter_type)
 	{
 		x_.reserve(count);
 		y_.reserve(count);
@@ -253,6 +544,8 @@ typedef struct _track_t
 
 		fx_.init(g, h, k, 1.0f);
 		fy_.init(g, h, k, 1.0f);
+
+		filter_type_ = filter_type;
 	}
 	void shrink()
 	{
@@ -291,6 +584,19 @@ typedef struct _track_t
 			}
 		}
 	}
+	void update(const float t, const fvec& data, fvec& sm)
+	{
+		switch( filter_type_ )
+		{
+			case filter_GH:
+				sm[0] = fx_.update(t, data(0), -1., -1., -1.);
+				sm[1] = fy_.update(t, data(1), -1., -1., -1.);
+				break;
+
+			case filter_KF:
+				break;
+		}
+	}
 	void update(const float t, const fvec& data)
 	{
 		x_.push_back(data(0));
@@ -301,8 +607,10 @@ typedef struct _track_t
 
 		if( xs_.size() > 2 )
 		{
-			xs_.push_back(fx_.update(1.0f, data(0), -1., -1., -1.));
-			ys_.push_back(fy_.update(1.0f, data(1), -1., -1., -1.));
+			fvec sm = zeros<fvec>(data.size());
+			update(t, data, sm);
+			xs_.push_back(sm[0]);
+			ys_.push_back(sm[1]);
 		}
 		else
 		{
@@ -319,6 +627,7 @@ typedef struct _track_t
 		}
 		t_.push_back(t);
 	}
+	int filter_type_;
 	std::vector<float> x_, y_, h_, t_;
 	std::vector<float> xs_, ys_;
 	GHFilter_t fx_, fy_;
@@ -326,14 +635,14 @@ typedef struct _track_t
 
 typedef struct _rls_t
 {
-	void init()
+	void init(int filter_type)
 	{
 		pos_ = zeros<fvec>(3);
 		to_ = 0.0f;
 		vr_ = 0.0f;
 		az_ = 0.0f;
 
-		track_.init(1000);
+		track_.init(1000, filter_type);
 	}
 	void set_az(const float az)
 	{
@@ -605,14 +914,16 @@ void time_command(const float ttx, target_t *ti)
 {
 //	time_command_1(ttx, ti);
 }
+
 #if 0
 int main() 
 {
 	init_global();
+	int ft = filter_GH;
 
 	rls_t rls1;
 
-	rls1.init();
+	rls1.init(ft);
 	rls1.set_pos(500.0f, 300.f, 20.0f);
 	rls1.set_cko(60.0f, 0.1f/radian);
 	rls1.set_rotate(5.0f);
@@ -627,7 +938,7 @@ int main()
 
 	track_t track;
 
-	track.init(10000);
+	track.init(10000, filter_GH);
 
 	fvec posm = zeros<fvec>(2);
 	fvec posn = zeros<fvec>(2);
@@ -716,6 +1027,51 @@ int main()
 	plt::save("./simulate.png");
 	plt::show();
 
+//	KFFilter_t kf;
+
+//	kf.init(4, 2);
+
+	fcolvec x = {1.f, 2.f, 3.f, 4.f};
+
+	fmat pp = {
+			{5., 6., 7., 8.},
+			{9., 10., 11., 12.},
+			{13., 14., 15., 16.},
+			{17., 18., 19., 20.}
+		};
+
+	fmat ff = {
+			{5.2, 6.2, 7.2, 8.2},
+			{9.2, 10.2, 11.2, 12.2},
+			{13.2, 14.2, 15.2, 16.2},
+			{17.2, 18.2, 19.2, 20.2}
+		};
+
+	fmat qq = {
+			{15., 16., 17., 18.},
+			{19., 110., 111., 112.},
+			{113., 114., 115., 116.},
+			{117., 118., 119., 120.}
+		};
+
+//	pp = ff * pp * ff.t() + qq;
+
+//	x = ff * x;
+//	x.print();
+//	fmat hh = {{1., 2., 3., 4.}, {5., 6., 7., 8.}};
+//	cout << "rows " << hh.n_rows << " cols " << hh.n_cols << endl;
+//	fcolvec cz = {12., 14.};
+//	fcolvec	y = cz - hh * x;
+//	y.print();
+//
+	fcolvec y = { 1., 2.};
+	fmat si = {{ 3., 3.}, {3., 3}};
+
+	fmat a = y.t()*si*y;
+	float c = sqrt((float)a(0));
+
+	a.print();
+	cout << c << endl;
   return 0;
 }
 #endif
@@ -756,7 +1112,7 @@ float power(float x, int n)
 
 }
 
-void Q_continuous_white_noise(int dim, float dt, float var, int block_size, bool order, fmat& q)
+void Q_continuous_white_noise(int dim, float dt, float den, int block_size, bool order, fmat& q)
 {
 	fmat a;
 	int N = dim * block_size;
@@ -772,8 +1128,10 @@ void Q_continuous_white_noise(int dim, float dt, float var, int block_size, bool
 		q = zeros<fmat>(N,N);
 
 		q.submat(0,0,1,1) = a;
-		q.submat(2,2,3,3) = a;
-		q.submat(4,4,5,5) = a;
+		if( block_size > 1 )
+			q.submat(2,2,3,3) = a;
+		if( block_size > 2 )
+			q.submat(4,4,5,5) = a;
 	}
 	else if( 3 == dim )
 	{
@@ -783,9 +1141,11 @@ void Q_continuous_white_noise(int dim, float dt, float var, int block_size, bool
 
 		q = zeros<fmat>(N,N);
 
-		q.submat(0,2,0,2) = a;
-		q.submat(3,5,3,5) = a;
-		q.submat(6,8,6,8) = a;
+		q.submat(0,0,2,2) = a;
+		if( block_size > 1 )
+			q.submat(3,3,5,5) = a;
+		if( block_size > 2 )
+			q.submat(6,6,8,8) = a;
 	}
 	else
 	{
@@ -796,12 +1156,14 @@ void Q_continuous_white_noise(int dim, float dt, float var, int block_size, bool
 
 		q = zeros<fmat>(N,N);
 
-		q.submat(0,3,0,3) = a;
-		q.submat(4,7,4,7) = a;
-		q.submat(8,11,8,11) = a;
+		q.submat(0,0,3,3) = a;
+		if( block_size > 1 )
+			q.submat(4,4,7,7) = a;
+		if( block_size > 2 )
+			q.submat(8,8,11,11) = a;
 	}
 
-	q *= var;
+	q *= den;
 }
 void Q_discrete_white_noise(int dim, float dt, float var, int block_size, bool order, fmat& q)
 {
@@ -819,8 +1181,10 @@ void Q_discrete_white_noise(int dim, float dt, float var, int block_size, bool o
 		q = zeros<fmat>(N,N);
 
 		q.submat(0,0,1,1) = a;
-		q.submat(2,2,3,3) = a;
-		q.submat(4,4,5,5) = a;
+		if( block_size > 1 )
+			q.submat(2,2,3,3) = a;
+		if( block_size > 2 )
+			q.submat(4,4,5,5) = a;
 	}
 	else if( 3 == dim )
 	{
@@ -831,8 +1195,10 @@ void Q_discrete_white_noise(int dim, float dt, float var, int block_size, bool o
 		q = zeros<fmat>(N,N);
 
 		q.submat(0,0,2,2) = a;
-		q.submat(3,3,5,5) = a;
-		q.submat(6,6,8,8) = a;
+		if( block_size > 1 )
+			q.submat(3,3,5,5) = a;
+		if( block_size > 2 )
+			q.submat(6,6,8,8) = a;
 	}
 	else
 	{
@@ -844,8 +1210,10 @@ void Q_discrete_white_noise(int dim, float dt, float var, int block_size, bool o
 		q = zeros<fmat>(N,N);
 
 		q.submat(0,0,3,3) = a;
-		q.submat(4,4,7,7) = a;
-		a.submat(8,8,11,11) = a;
+		if( block_size > 1 )
+			q.submat(4,4,7,7) = a;
+		if( block_size > 2 )
+			a.submat(8,8,11,11) = a;
 	}
 
 	q *= var;
@@ -855,6 +1223,30 @@ void van_loan_diskretization(const fvec& F, const fvec& G, const float dt, fvec&
 {
 }
 
+typedef struct 
+{
+	void init(const float x0=0.0f, const float vel=1.0f, const float noise_scale=0.06f)
+	{
+		_x = x0;
+		_vel = vel;
+		_noise_scale = noise_scale;
+	}
+	void update(float &x, float &vel)
+	{
+		_vel += randn<float>() * _noise_scale;
+		vel = _vel;
+
+		_x += _vel;
+		x = _x;
+	}
+	float sense(const float x, const float noise_scale=1.0f)
+	{
+		return x + randn<float>() * noise_scale;
+	}
+	float _x, _vel, _noise_scale;
+} ConstantVelocityObject_t;
+
+#if 0
 int main()
 {
 	fmat A, B, F, x, y, z;
@@ -888,6 +1280,130 @@ int main()
 	B = expmat(A);
 
 	B.print();
+
+	return 0;
+}
+#endif
+
+typedef struct
+{
+	void init(const float R, const float Q, const float P=20.0f)
+	{
+		kf.init(1, 1);
+		kf._x = {0.0f};
+		kf._R *= R;
+		kf._Q *= Q;
+		kf._P *= P;
+		kf._F = eye<fmat>(1, 1);
+		kf._H = eye<fmat>(1, 1);
+	}
+	KFFilter_t kf;
+} ZeroOrderKF_t;
+
+typedef struct
+{
+	void init(const float R, const float Q, const float dt)
+	{
+		kf.init(2, 1);
+		kf._x = zeros<fcolvec>(2);
+		kf._R *= R;
+		Q_discrete_white_noise(2, dt, Q, 1, false, kf._Q);
+		kf._P *= {{100.0f, 0.0f}, {0.0f, 1.0f}};
+		kf._F = {{1.0f, dt}, {0.0f, 1.0f}};
+		kf._H = {{1.0f, 0.0f}};
+	}
+	KFFilter_t kf;
+} FirstOrderKF_t;
+
+typedef struct
+{
+	void init(const float R_std, const float Q, const float dt, const float P=100.0f)
+	{
+		kf.init(3, 1);
+		kf._x = zeros<fcolvec>(3);
+		kf._R *= power(R_std, 2);
+		Q_discrete_white_noise(3, dt, Q, 1, false, kf._Q);
+		kf._P *= {{100.0f, 0.0f}, {0.0f, 1.0f}};
+		kf._F = {{1.0f, dt, 0.5f*dt*dt}, 
+			{0.0f, 1.0f, dt}, 
+			{0.0f, 0.0f, 1.0f}};
+		kf._H = {{1.0f, 0.0f, 0.0f}};
+	}
+	KFFilter_t kf;
+} SecondOrderKF_t;
+
+int main()
+{
+#if 0	
+	float dt = 0.1f;
+	fmat F = {{1.0f, dt}, {0.0f, 1.0f}};
+	fcolvec x = {10.0f, 4.5f};
+	fmat P = diagmat((fmat){500.0f, 49.0f});
+	fmat Q = zeros<fmat>(2, 2);
+
+	F.print();
+	x.print();
+	P.print();
+	Q.print();
+
+	KFFilter_t kf;
+
+	kf.init(2, 2);
+
+	kf._x = x;
+	kf._P = P;
+	kf._F = F;
+	kf._Q = Q;
+
+	fmat zero;
+
+	for( auto i=0; i<5; ++i)
+	{
+		kf.predict(zero, zero, zero, zero);
+		kf._x.print();
+	}
+
+	kf._P.print();
+
+	fmat q;
+
+	Q_discrete_white_noise(2, 1.0f, 2.35f, 1, false, q);
+	q.print();
+
+	fmat qx;
+
+	Q_continuous_white_noise(3, 1.0f, 1.0f, 1, false, qx);
+	qx.print();
+
+	fmat R = {5.0f};
+	R.print();
+	fmat H = {1.0f, 0.0f};
+	H.print();
+#endif
+
+	ConstantVelocityObject_t obj;
+
+	obj.init();
+
+	std::vector<float> xs, zs;
+
+	float x, v, z;
+	for( auto i=0; i<50; ++i )
+	{
+		obj.update(x, v);
+		xs.push_back(x);
+		z = obj.sense(x);
+		zs.push_back(z);
+	}
+
+	plt::plot(xs);
+	plt::plot(zs);
+
+//	plt::xlim(-400000.0f, 400000.0f);
+//	plt::ylim(-100000.0f, 100000.0f);
+	plt::grid(true);
+	plt::save("./simulate.png");
+	plt::show();
 
 	return 0;
 }
