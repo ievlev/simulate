@@ -2,9 +2,11 @@
 #include <vector>
 #include <random>
 #include <cmath>
+#include <limits>
 
 #include <armadillo> 
 #include "matplotlibcpp.h"
+#include "armalogp.h"
 
 namespace plt = matplotlibcpp;
 
@@ -17,6 +19,167 @@ float g22, g45, g67, g90, g112, g135, g157, g180, g202, g225, g247, g270, g292, 
 float logpdf(const fcolvec& x, const fmat& cov)
 {
 }
+
+#if 0
+template<typename T, typename U>
+double multivariate_normal_chol_logp(const T& x, const U& mu, const arma::mat& R)
+{
+	static double log_2pi = log(2.0f * arma::math::pi());
+	double ldet = log(cholesky_determinant(R));
+	return -0.5f * (x.n_elem * log_2pi + ldet + mahalanobis_chol(x, mu, R));
+}
+
+typedef struct _armalogp_t
+{
+	static inline double square(double x)
+	{
+		return x*x;
+	}
+	static inline int square(int x)
+	{
+		return x*x;
+	}
+	static double cholesky_determinant(const arma::mat& R)
+	{
+		return arma::prod((R.diag()*R.diag()));
+	}
+	static double mahalanobis(const arma::vec& x, const arma::vec& mu, const arma::mat& sigma)
+	{
+		const arma::vec err = x - mu;
+		return std::sqrt(arma::as_scalar(err.t() * sigma.i() * err));
+	}
+	static double mahalanobis(const arma::rowvec& x, const arma::rowvec& mu, const arma::mat& sigma)
+	{
+		const arma::rowvec err = x - mu;
+		return std::sqrt(arma::as_scalar(err * sigma.i() * err.t()));
+	}
+	static double mahalanobis_chol(const arma::rowvec& x, const arma::rowvec& mu, const arma::mat& R)
+	{
+		const arma::rowvec err = x - mu;
+		const arma::mat Rinv(inv(trimatl(R)));
+		return std::sqrt(arma::as_scalar(err * Rinv * Rinv.t() * err.t()));
+	}
+	static double multivariate_normal_chol_logp(const arma::mat& x, const arma::vec& mu, const arma::mat& R)
+	{
+		const arma::rowvec mu_r = mu.t();
+		double ans(0.0);
+		for( size_t i = 0; i < x.n_rows; ++i )
+			ans += multivariate_normal_chol_logp(x.row(i), mu_r, R);
+
+		return ans;
+	}
+	static double multivariate_normal_sigma(const arma::mat& x, const arma::vec& mu, const arma::mat& sigma)
+	{
+		arma::mat R;
+		bool chol_succeeded = chol(R, sigma);
+
+		if(!chol_succeeded )
+			return -std::numeric_limits<double>::infinity();
+
+		const arma::rowvec mu_r = mu.t();
+		double ans(0.0);
+		for( size_t i = 0; i < x.n_rows; ++i )
+			ans += multivariate_normal_chol_logp(x.row(i), mu_r, R);
+
+		return ans;
+	}
+	static double wishart_logp(const arma::mat& X, const arma::mat& tau, const unsigned int n)
+	{
+		if( (X.n_cols != X.n_rows) || (tau.n_cols != tau.n_rows) || (X.n_cols != tau.n_rows) || (X.n_cols > n) )
+			return -std::numeric_limits<double>::infinity();
+
+		const double lg2 = log(2.0f);
+		const int k = X.n_cols;
+		const double dx(arma::det(X));
+		const double db(arma::det(tau));
+
+		if( (dx <= 0.0f) || (db <= 0.0f) )
+			return -std::numeric_limits<double>::infinity();
+
+		const double ldx = log(dx);
+		const double ldb = log(db);
+		const arma::mat bx(X * tau);
+		const double tbx = arma::trace(bx);
+
+		double cum_lgamma(0.0);
+		for(size_t i = 0; i < X.n_rows; ++i)
+			cum_lgamma += lgamma((n+1)/2.0f);
+
+		return (n - k - 1)/ 2.0f * ldx + (n/2.0f)*ldb - 0.5f*tbx - (n*k/2.0f)*lg2 - cum_lgamma;
+	}
+} armalogp_t;
+#endif
+
+#if 0
+double wishart_logp(const arma::mat& X, const arma::mat& tau, const unsigned int n)
+{
+	if( (X.n_cols != X.n_rows) || (tau.n_cols != tau.n_rows) || (X.n_cols != tau.n_rows) || (X.n_cols > n) )
+		return -std::numeric_limits<double>::infinity();
+
+	const double lg2 = log(2.0f);
+	const int k = X.n_cols;
+	const double dx(arma::det(X));
+	const double db(arma::det(tau));
+
+	if( (dx <= 0.0f) || (db <= 0.0f) )
+		return -std::numeric_limits<double>::infinity();
+
+	const double ldx = log(dx);
+	const double ldb = log(db);
+	const arma::mat bx(X * tau);
+	const double tbx = arma::trace(bx);
+
+	double cum_lgamma(0.0);
+	for(size_t i = 0; i < X.n_rows; ++i)
+	{
+		cum_lgamma += lgamma((n+1)/2.0f);
+	}
+
+	return (n - k - 1)/ 2.0f * ldx + (n/2.0f)*ldb - 0.5f*tbx - (n*k/2.0f)*lg2 - cum_lgamma;
+}
+
+double multivariate_normal_chol_logp(const arma::mat& x, const arma::vec& mu, const arma::mat& R)
+{
+	const arma::rowvec mu_r = mu.t();
+	double ans(0.0);
+	for( size_t i = 0; i < x.n_rows; ++i )
+	{
+		ans += multivariate_normal_chol_logp(x.row(i), mu_r, R);
+	}
+
+	return ans;
+}
+
+double multivariate_normal_sigma(const arma::mat& x, const arma::vec& mu, const arma::mat& sigma)
+{
+	arma::mat R;
+	bool chol_succeeded = chol(R, sigma);
+
+	if(!chol_succeeded )
+		return -std::numeric_limits<double>::infinity();
+
+	const arma::rowvec mu_r = mu.t();
+	double ans(0.0);
+	for( size_t i = 0; i < x.n_rows; ++i )
+	{
+		ans += multivariate_normal_chol_logp(x.row(i), mu_r, R);
+	}
+
+	return ans;
+}
+
+double mahalanobis(const arma::vec& x, const arma::vec& mu, const arma::mat& sigma)
+{
+	const arma::vec err = x - mu;
+	return std::sqrt(arma::as_scalar(err.t() * sigma.i() * err));
+}
+
+double mahalanobis(const arma::rowvec& x, const arma::rowvec& mu, const arma::mat& sigma)
+{
+	const arma::rowvec err = x - mu;
+	return std::sqrt(arma::as_scalar(err.t() * sigma.i() * err));
+}
+#endif
 
 void init_global()
 {
@@ -296,7 +459,7 @@ typedef struct
 
 		log_likelihood = datum::log_min;
 		likelihood = exp(datum::log_min);
-		mahalanobis = 0.0f;
+		mahalanobis = datum::nan;
 	}
 	void set_alpha(const float alpha)
 	{
@@ -365,6 +528,8 @@ typedef struct
 		S = H*PHT + R;
 		SI = inv(S);
 		K = PHT*SI;
+
+		mahalanobis = calc_mahalanobis();
 
 		_x = _x + K*_y;
 
@@ -503,13 +668,14 @@ typedef struct
 	}
 	float calc_mahalanobis()
 	{
-		if( datum::nan == mahalanobis )
-		{
-			fmat m = _y.t()*SI*_y;
-			mahalanobis = sqrt(m(0));
-		}
+		mahalanobis = std::sqrt(arma::as_scalar(_y.t() * SI * _y));
 
 		return mahalanobis;
+	}
+	float calc_mahalanobis(const arma::fcolvec& z)
+	{
+		const arma::fcolvec err = z - _H * _x;
+		return std::sqrt(arma::as_scalar(err.t() * SI * err));
 	}
 	float alpha_sq;
 	int dim_x;
@@ -1246,6 +1412,31 @@ typedef struct
 	float _x, _vel, _noise_scale;
 } ConstantVelocityObject_t;
 
+typedef struct 
+{
+	void init(const float x0=0.0f, const float vel=1.0f, const float acc=0.1f, const float acc_noise=0.1f)
+	{
+		_x = x0;
+		_vel = vel;
+		_acc = acc;
+		_acc_noise_scale = acc_noise;
+	}
+	void update(float &x, float &vel)
+	{
+		_acc += std::abs(randn<float>()) * _acc_noise_scale;
+		_vel += _acc;
+		vel = _vel;
+
+		_x += _vel;
+		x = _x;
+	}
+	float sense(const float x, const float noise_scale=1.0f)
+	{
+		return x + randn<float>() * noise_scale;
+	}
+	float _x, _vel, _acc, _acc_noise_scale;
+} ConstantAccelerationObject_t;
+
 #if 0
 int main()
 {
@@ -1297,6 +1488,14 @@ typedef struct
 		kf._F = eye<fmat>(1, 1);
 		kf._H = eye<fmat>(1, 1);
 	}
+	void predict(const fcolvec& u, const fmat& b, const fmat& f, const fmat& q)
+	{
+		kf.predict(u, b, f, q);
+	}
+	void update(const fcolvec& z, const fmat& r, const fmat& h)
+	{
+		kf.update(z, r, h);
+	}
 	KFFilter_t kf;
 } ZeroOrderKF_t;
 
@@ -1312,6 +1511,14 @@ typedef struct
 		kf._F = {{1.0f, dt}, {0.0f, 1.0f}};
 		kf._H = {{1.0f, 0.0f}};
 	}
+	void predict(const fcolvec& u, const fmat& b, const fmat& f, const fmat& q)
+	{
+		kf.predict(u, b, f, q);
+	}
+	void update(const fcolvec& z, const fmat& r, const fmat& h)
+	{
+		kf.update(z, r, h);
+	}
 	KFFilter_t kf;
 } FirstOrderKF_t;
 
@@ -1321,17 +1528,32 @@ typedef struct
 	{
 		kf.init(3, 1);
 		kf._x = zeros<fcolvec>(3);
-		kf._R *= power(R_std, 2);
+		kf._R *= R_std*R_std;
 		Q_discrete_white_noise(3, dt, Q, 1, false, kf._Q);
-		kf._P *= {{100.0f, 0.0f}, {0.0f, 1.0f}};
+		kf._P[0, 0] = P;
+	        kf._P[1, 1] = 1.0f;
+		kf._P[2, 2] = 1.0f;
 		kf._F = {{1.0f, dt, 0.5f*dt*dt}, 
 			{0.0f, 1.0f, dt}, 
 			{0.0f, 0.0f, 1.0f}};
 		kf._H = {{1.0f, 0.0f, 0.0f}};
 	}
+	void predict(const fcolvec& u, const fmat& b, const fmat& f, const fmat& q)
+	{
+		kf.predict(u, b, f, q);
+	}
+	void update(const fcolvec& z, const fmat& r, const fmat& h)
+	{
+		kf.update(z, r, h);
+	}
+	float calc_mahalanobis(const fcolvec& z)
+	{
+		return kf.calc_mahalanobis(z);
+	}
 	KFFilter_t kf;
 } SecondOrderKF_t;
 
+#if 0
 int main()
 {
 #if 0	
@@ -1405,6 +1627,168 @@ int main()
 	plt::save("./simulate.png");
 	plt::show();
 
+	return 0;
+}
+#endif
+
+#if 0
+int main()
+{
+	fcolvec zerov;
+	fmat zerom;
+	float R = 1.0f, Q = 0.0001f, dt = 1.0f;
+
+	ConstantVelocityObject_t obj;
+	obj.init(0.0f, 0.5f, Q);
+
+	ZeroOrderKF_t kf0;
+	kf0.init(R, Q, dt);
+
+	FirstOrderKF_t kf1;
+	kf1.init(R, Q, dt);
+
+	SecondOrderKF_t kf2;
+	kf2.init(R, 0, dt);
+
+	std::vector<float> xs, zs, f0, f1, f2;
+
+	float x, v, z;
+	int count = 200;
+	for( auto i=0; i<count; ++i )
+	{
+		obj.update(x, v);
+		xs.push_back(x);
+		z = obj.sense(x);
+		zs.push_back(z);
+
+#if 0		
+		kf0.predict(zerov, zerom, zerom, zerom);
+		fcolvec zv = {z};
+		kf0.update(zv, zerom, zerom);
+		f0.push_back(kf0.kf._x[0]);
+#endif		
+#if 0		
+		kf1.predict(zerov, zerom, zerom, zerom);
+		fcolvec zv = {z};
+		kf1.update(zv, zerom, zerom);
+		f1.push_back(kf1.kf._x[0]);
+#endif		
+		kf2.predict(zerov, zerom, zerom, zerom);
+		fcolvec zv = {z};
+		kf2.update(zv, zerom, zerom);
+		f2.push_back(kf2.kf._x[0]);
+	}
+
+	plt::plot(xs);
+	plt::plot(zs);
+	plt::plot(f2);
+
+//	plt::xlim(-400000.0f, 400000.0f);
+//	plt::ylim(-100000.0f, 100000.0f);
+	plt::grid(true);
+	plt::save("./simulate.png");
+	plt::show();
+
+	return 0;
+}
+#endif
+
+int main()
+{
+	fcolvec zerov;
+	fmat zerom;
+	float R = 6.0f, Q = 0.02f, dt = 1.0f;
+
+	ConstantAccelerationObject_t obj;
+	obj.init(0.0f, 1.0f, 0.1f, Q);
+
+	ZeroOrderKF_t kf0;
+	kf0.init(R, Q, dt);
+
+	FirstOrderKF_t kf1;
+	kf1.init(R, Q, dt);
+
+	SecondOrderKF_t kf2;
+	kf2.init(R, Q, dt);
+
+	std::vector<float> xs, zs, f0, f1, f2, ma, ma1, resi;
+
+	float x, v, z;
+	int count = 80;
+	for( auto i=0; i<count; ++i )
+	{
+		obj.update(x, v);
+		xs.push_back(x);
+		z = obj.sense(x, R);
+		zs.push_back(z);
+
+#if 0		
+		kf0.predict(zerov, zerom, zerom, zerom);
+		fcolvec zv = {z};
+		kf0.update(zv, zerom, zerom);
+		f0.push_back(kf0.kf._x[0]);
+#endif		
+#if 0		
+		kf1.predict(zerov, zerom, zerom, zerom);
+		fcolvec zv = {z};
+		kf1.update(zv, zerom, zerom);
+		f1.push_back(kf1.kf._x[0]);
+#endif		
+		kf2.predict(zerov, zerom, zerom, zerom);
+		fcolvec zv = {z};
+		ma1.push_back(kf2.kf.calc_mahalanobis(zv));
+		kf2.update(zv, zerom, zerom);
+		f2.push_back(kf2.kf._x[0]);
+		ma.push_back(kf2.kf.mahalanobis);
+		resi.push_back(kf2.kf._y[0]);
+	}
+
+		xs.push_back(x);
+		z = obj.sense(x, R);
+		zs.push_back(z);
+
+		kf2.predict(zerov, zerom, zerom, zerom);
+		fcolvec zv = {z};
+		ma1.push_back(kf2.kf.calc_mahalanobis(zv));
+		kf2.update(zv, zerom, zerom);
+		f2.push_back(kf2.kf._x[0]);
+		ma.push_back(kf2.kf.mahalanobis);
+		resi.push_back(kf2.kf._y[0]);
+
+	plt::plot(xs);
+	plt::plot(zs);
+	plt::plot(f2);
+
+//	plt::xlim(-400000.0f, 400000.0f);
+//	plt::ylim(-100000.0f, 100000.0f);
+	plt::grid(true);
+	plt::save("./simulate.png");
+	plt::show();
+
+//	vec mx = {1.0f, 2.0f}, mmu = {1.1f, 3.5f};
+//	mat msi = {{1.0f, 0.1f}, {0.1f, 13.0f}};
+//	vec mx = {3.0f}, mmu = {3.5f};
+//	mat msi = {4.0f*4.0f};
+
+//	double mma = mahalanobis(mx, mmu, msi);
+//	std::cout << mma << endl;
+
+	plt::plot(ma);
+	plt::plot(ma1);
+
+//	plt::xlim(-400000.0f, 400000.0f);
+//	plt::ylim(-100000.0f, 100000.0f);
+	plt::grid(true);
+	plt::save("./simulate.png");
+	plt::show();
+
+	plt::plot(resi);
+
+//	plt::xlim(-400000.0f, 400000.0f);
+//	plt::ylim(-100000.0f, 100000.0f);
+	plt::grid(true);
+	plt::save("./simulate.png");
+	plt::show();
 	return 0;
 }
 
